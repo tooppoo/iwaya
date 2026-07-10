@@ -1,6 +1,6 @@
 # Define iwaya as a Policy-Aware Command Proxy
 
-- Status: Proposed
+- Status: Accepted
 - Created: 2026-07-02T00:54:00Z
 
 ## Context
@@ -11,7 +11,7 @@ That framing is too narrow. The core problem is not container connectivity itsel
 
 Using `gh auth login` inside a devcontainer can persist GitHub credentials inside the container. Mounting host SSH credentials into a container can weaken the host credential boundary. Manually separating tokens by purpose is safer, but it is operationally expensive for normal CLI use.
 
-This decision needs an ADR because it defines iwaya's architectural identity, security boundary, and future extension model.
+This decision needs an ADR because it defines iwaya's architectural identity, security boundary, policy evaluation model, and future extension model.
 
 Related issues:
 
@@ -19,11 +19,44 @@ Related issues:
 - #6
 - #7
 
+Related ADRs:
+
+- [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md)
+- [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md)
+
 ## Decision
 
 iwaya will be designed as a policy-aware command proxy.
 
-iwaya receives or intercepts a command execution request, evaluates policy, resolves required secrets from external secret managers, and executes the authorized child process with process-local secret injection.
+iwaya receives or intercepts a command execution request, evaluates policy, determines the resulting injection mapping, resolves required secrets from external secret managers, and executes the authorized child process with process-local secret injection.
+
+### Command invocation
+
+Policy is evaluated against the command invocation that has been resolved immediately before delegation to an execution backend.
+
+A command invocation consists of:
+
+- resolved command name
+- argument list
+- current working directory
+- repository context
+- execution backend kind
+- requested profile or policy scope, when explicitly provided
+
+The injection mapping is not an input to policy evaluation. It is an output of the matched policy.
+
+### Policy precedence and fallback
+
+Policy evaluation must follow these rules:
+
+1. An explicit deny rule takes precedence over any matching allow rule.
+2. A matching allow rule may define the secrets and environment variable names injected into the child process.
+3. When no policy rule matches, iwaya delegates the command to the selected backend without secret injection.
+4. A command is denied only when an explicit policy rule constrains and denies that command or command pattern.
+
+The default behavior is therefore pass-through execution without injected secrets, not default denial.
+
+### Responsibility boundary
 
 iwaya must not be a secret manager.
 
@@ -42,13 +75,15 @@ The external secret manager remains responsible for:
 
 iwaya is responsible for:
 
-- command and argument observation
+- command invocation observation
 - policy matching
+- injection mapping determination
 - execution backend selection
 - secret reference resolution through a configured provider command or integration
 - child-process-only injection
 - log and diagnostic redaction
 - deny behavior for policy-prohibited commands
+- pass-through execution without secret injection when no policy matches
 
 Execution backends, such as local process execution and devcontainer execution, are extension points. They do not define iwaya's core identity.
 
@@ -61,6 +96,8 @@ iwaya does not claim to prevent all malicious scripts or commands from leaking s
 iwaya does not claim to prevent a trusted command from printing, saving, forwarding, or otherwise mishandling a secret.
 
 iwaya does not replace 1Password, Bitwarden Secrets Manager, OS keychains, GitHub Apps, deploy keys, or other credential authorities.
+
+The detailed non-sandbox boundary is recorded separately in [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md).
 
 ## Alternatives Considered
 
@@ -78,6 +115,12 @@ This was not selected as the primary product model because it does not preserve 
 
 It may still exist as a lower-level interface or test path.
 
+### Default deny for unmatched commands
+
+Under this model, every command without an explicit allow rule would be rejected.
+
+This was not selected because iwaya-managed sessions are intended to remain usable as ordinary shell sessions. Commands that do not require managed secrets should continue to run through the selected backend without secret injection. Explicit deny rules remain available for commands or patterns that require restrictions.
+
 ### Secret retrieval helper
 
 A tool that prints or exports secrets would be simpler to implement.
@@ -92,12 +135,14 @@ This was rejected because it moves iwaya toward being a secret extraction tool. 
 - Local process execution can be implemented before devcontainer support.
 - Secret storage and rotation remain delegated to existing secret managers.
 - The same policy model can be reused across multiple execution backends.
-- The security boundary is easier to state: iwaya runs commands with scoped secret injection; it does not hand out secrets.
+- Unmanaged commands remain usable without receiving managed secrets.
+- The security boundary is easier to state: iwaya runs authorized commands with scoped secret injection; it does not hand out secrets.
 
 ### Negative Consequences
 
 - iwaya must implement policy matching carefully enough to avoid becoming a broad token-forwarding tool.
-- Command and argument matching become part of the security-sensitive design surface.
+- Command, argument, repository, and backend matching become part of the security-sensitive design surface.
+- Explicit deny rules must be defined precisely because unmatched commands are passed through.
 - Once a child process receives a secret, iwaya cannot fully control what that process does with it.
 - The product must document its non-sandbox boundary clearly to avoid overclaiming safety.
 
