@@ -8,12 +8,16 @@
   ],
   "postCreateCommand": "sh scripts/setup-dev.sh",
   "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/tooppoo/catalog-devcontainer-features/git-kura:0": {},
+    "ghcr.io/tooppoo/catalog-devcontainer-features/rellog:0": {},
+    "ghcr.io/tooppoo/catalog-devcontainer-features/enozunu:0": {}
   },
   "customizations": {
     "vscode": {
       "extensions": [
-        "EditorConfig.EditorConfig"
+        "EditorConfig.EditorConfig",
+        "skellock.just"
       ],
       "settings": {
         "editor.formatOnSave": true,
