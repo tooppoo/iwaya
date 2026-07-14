@@ -1,7 +1,7 @@
 {
-  "name": "template-dev",
+  "name": "iwaya-dev",
   "image": "mcr.microsoft.com/devcontainers/base:2.1.9-trixie",
-  "workspaceFolder": "/workspaces/fizz",
+  "workspaceFolder": "/workspaces/iwaya",
   "remoteUser": "vscode",
   "runArgs": [
     "--init"
