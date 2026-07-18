@@ -17,7 +17,8 @@
     "vscode": {
       "extensions": [
         "EditorConfig.EditorConfig",
-        "skellock.just"
+        "skellock.just",
+        "kdl-org.kdl"
       ],
       "settings": {
         "editor.formatOnSave": true,
