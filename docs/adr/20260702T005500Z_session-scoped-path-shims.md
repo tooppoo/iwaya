@@ -1,6 +1,6 @@
 # Use Session-Scoped PATH Shims for Transparent Command Proxying
 
-- Status: Accepted
+- Status: Superseded by [20260718T211800Z_explicit-command-execution-for-v0.md](20260718T211800Z_explicit-command-execution-for-v0.md)
 - Created: 2026-07-02T00:55:00Z
 
 ## Context
