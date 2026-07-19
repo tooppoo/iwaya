@@ -8,7 +8,7 @@ It resolves and injects secrets for explicitly invoked commands according to the
 
 iwaya is a mitigation layer, not a security sandbox. It does not guarantee containment of malicious commands or prevent every possible form of secret exfiltration.
 
-See [Security Model and Limitations](docs/security-model.md) for the security boundary and non-goals.
+See [Security Model and Limitations](docs/design/security-model.md) for the security boundary and non-goals.
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ For example:
 iwaya exec -- your-command --flag value
 ```
 
-See [Getting Started](docs/getting-started.md) for installation, initial configuration, and a complete walkthrough.
+See [Getting Started](docs/guide/getting-started.md) for installation, initial configuration, and a complete walkthrough.
 
 ## Basic Usage
 
@@ -46,19 +46,19 @@ In v0:
 * only the explicitly invoked command is handled by iwaya;
 * subprocesses started by that command are not automatically intercepted.
 
-See the [CLI Reference](docs/cli.md) for the complete command-line interface and the [Policy Reference](docs/policy.md) for command matching and secret handling semantics.
+See the [CLI Reference](docs/guide/cli.md) for the complete command-line interface and the [Policy Reference](docs/design/policy.md) for command matching and secret handling semantics.
 
 ## Index for Documents
 
 ### Guides and references
 
-* [Getting Started](docs/getting-started.md)
-* [CLI Reference](docs/cli.md)
-* [Configuration Reference](docs/configuration.md)
-* [Policy Reference](docs/policy.md)
+* [Getting Started](docs/guide/getting-started.md)
+* [CLI Reference](docs/guide/cli.md)
+* [Configuration Reference](docs/guide/configuration.md)
+* [Policy Reference](docs/design/policy.md)
 
 ### Design and security
 
-* [Security Model and Limitations](docs/security-model.md)
-* [Command Proxy Architecture](docs/architecture/command-proxy.md)
+* [Security Model and Limitations](docs/design/security-model.md)
+* [Command Proxy Architecture](docs/design/command-proxy.md)
 * [Architecture Decision Records](docs/adr/README.md)
