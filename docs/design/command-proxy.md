@@ -34,7 +34,7 @@ iwaya exec -- <command> [args...]
 
 The `--` separator is required. Arguments before `--` belong to iwaya, and the command name and all arguments after `--` belong to the target command.
 
-Only a command passed through `iwaya exec --` enters iwaya's execution boundary. A command invoked directly from the surrounding shell proceeds under ordinary shell and operating-system command resolution, and iwaya makes no claim over it.
+Only a command passed through `iwaya exec --` enters iwaya's execution boundary. See [what iwaya does not protect against](security-model.md#what-iwaya-does-not-protect-against) for what that excludes.
 
 v0 deliberately provides no managed shell session, no `PATH` shims, and no automatic command interception. The explicit prefix makes iwaya-mediated execution visible at the call site, and it keeps executable resolution unchanged. A session mode may be reconsidered later as a frontend over this same core, which is why authorization semantics are defined independently of the frontend.
 
