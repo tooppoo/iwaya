@@ -45,12 +45,16 @@ iwaya provides no protection against the following.
 
 The intended lifecycle constrains how long a resolved value exists and where it may travel:
 
-```txt
-external secret manager
-  -> resolve only after policy authorization
-  -> hold only as required for child-process construction
-  -> inject into the child process
-  -> release iwaya-owned references after process setup or completion
+```mermaid
+flowchart TD
+    manager["external secret manager"]
+    held["value held by iwaya"]
+    child["child process"]
+    released["iwaya-owned references released"]
+
+    manager -->|"resolve only after policy authorization"| held
+    held -->|"hold only as required for child-process construction"| child
+    child -->|"after process setup or completion"| released
 ```
 
 Resolution must not precede authorization. A denied invocation must not cause a secret to be fetched, because retrieval itself may be observable to the secret manager or to an intermediary.

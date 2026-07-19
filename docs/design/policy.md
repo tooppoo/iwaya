@@ -66,18 +66,23 @@ This separation exists to avoid a circular authorization model, in which the sec
 
 ## Outcome Summary
 
-```txt
-unmanaged command
-  -> pass through without managed secrets
+```mermaid
+flowchart TD
+    invocation["command invocation"]
+    registered{"registered as a managed command?"}
+    denyRule{"matching deny rule?"}
+    allowRule{"matching allow rule?"}
+    passthrough["unmanaged pass-through<br>execute without managed policy or secrets"]
+    denied["Deny<br>do not resolve secrets, do not execute"]
+    allowed["Allow<br>execute, with optional authorized injection"]
 
-managed command + deny match
-  -> deny
-
-managed command + allow match
-  -> execute, with optional authorized injection
-
-managed command + no allow match
-  -> deny
+    invocation --> registered
+    registered -->|"no"| passthrough
+    registered -->|"yes"| denyRule
+    denyRule -->|"yes"| denied
+    denyRule -->|"no"| allowRule
+    allowRule -->|"no"| denied
+    allowRule -->|"yes"| allowed
 ```
 
 ## Semantics Are Independent of the Frontend

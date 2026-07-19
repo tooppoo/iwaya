@@ -40,24 +40,16 @@ v0 deliberately provides no managed shell session, no `PATH` shims, and no autom
 
 ## High-Level Structure
 
-```txt
-user
-  |
-  | iwaya exec -- gh pr list
-  v
-iwaya core
-  1. resolve command invocation
-  2. classify: managed or unmanaged
-  3. evaluate policy for managed commands
-  4. resolve only the authorized secrets
-  5. construct the execution plan
-  |
-  v
-execution backend
-  |
-  v
-real child process
-  - receives only policy-authorized injected secrets
+```mermaid
+flowchart TD
+    user["user"]
+    core["iwaya core<br>1. resolve command invocation<br>2. classify as managed or unmanaged<br>3. evaluate policy for managed commands<br>4. resolve only the authorized secrets<br>5. construct the execution plan"]
+    backend["execution backend"]
+    child["real child process<br>receives only policy-authorized injected secrets"]
+
+    user -->|"explicit invocation"| core
+    core --> backend
+    backend --> child
 ```
 
 ## Components
