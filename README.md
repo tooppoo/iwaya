@@ -46,9 +46,7 @@ In v0:
 * only the explicitly invoked command is handled by iwaya;
 * subprocesses started by that command are not automatically intercepted.
 
-A command is managed by iwaya only when it is registered in the configuration. A managed command is default-deny: it runs only when an allow rule matches. An unregistered command passes through without managed policy evaluation or managed secrets.
-
-See the [Policy Reference](docs/design/policy.md) for command matching and secret handling semantics.
+Whether iwaya manages a command depends on whether it is registered in the configuration, and managed commands are default-deny. See the [Policy Reference](docs/design/policy.md) for classification, command matching, and secret handling semantics.
 
 ## Index for Documents
 

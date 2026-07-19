@@ -72,15 +72,15 @@ It must not expose a general-purpose API or command that prints, exports, or ret
 
 ### Policy Evaluator
 
-The policy evaluator receives a resolved command invocation and returns an authorization outcome. For a managed command that outcome is `Allow` — optionally carrying an injection mapping — or `Deny`. An unmanaged command is not evaluated at all.
+The policy evaluator receives a resolved command invocation and returns an authorization outcome, according to [the policy reference](policy.md).
 
-The evaluator is the only component that decides authorization. Backends and frontends must not reinterpret its result.
+Its architectural role is to be the sole authority on authorization. No other component may decide, infer, or reinterpret that outcome, and no frontend or backend may alter it.
 
 ### Secret Resolver
 
 The secret resolver obtains values from an external secret manager or configured provider integration, and only after policy has authorized injection.
 
-The ordering is a requirement rather than an optimization: resolution is observable to the secret manager, so a denied invocation must not trigger it.
+The ordering is a requirement rather than an optimization. See [the secret lifecycle](security-model.md#secret-lifecycle) for why.
 
 Responsibilities that remain with the external secret manager, and the constraints on holding a resolved value, are described in [the security model](security-model.md#division-of-responsibility).
 
@@ -143,14 +143,14 @@ matched policy result:
 
 ### Managed Command, Denied
 
-A denial arises either from a matching explicit deny rule or from the absence of any allow match. Both paths are identical from the child process's perspective:
+The flow is the same whatever the cause of the denial, which [the policy reference](policy.md#managed-commands-are-default-deny) defines:
 
 ```txt
 1. The user runs a managed command.
 2. The policy evaluator returns Deny.
 3. iwaya does not resolve any secret.
 4. iwaya does not execute the real command.
-5. iwaya returns a non-secret diagnostic that distinguishes the two denial causes.
+5. iwaya returns a non-secret diagnostic that distinguishes the denial causes.
 ```
 
 ### Unmanaged Command, Pass-Through
@@ -170,20 +170,18 @@ A user should be able to wrap an existing command in `iwaya exec --` without cha
 
 ## Architectural Invariants
 
-Implementations must preserve the following:
+These are the structural invariants. They constrain how components are arranged and what may flow between them, rather than restating the authorization rules themselves.
 
 1. iwaya does not persist raw secret values.
 2. iwaya does not expose a secret retrieval API.
 3. Classification into managed or unmanaged precedes policy evaluation.
-4. Managed commands are default-deny.
-5. Explicit deny takes precedence over allow.
-6. Injection mappings are produced by policy, not supplied as authorization facts by the command invocation.
-7. Secret resolution occurs only after an allow result.
-8. Unmanaged commands receive no managed secrets.
-9. Injected secrets are scoped to the authorized child-process execution.
-10. Execution backends do not redefine core policy semantics.
-11. Authorization semantics do not depend on the frontend that supplied the invocation.
-12. iwaya is not represented as a sandbox.
+4. The policy evaluator is the sole authority on authorization, under the rules defined in [the policy reference](policy.md#managed-commands-are-default-deny). Every other component treats its outcome as given.
+5. Injection mappings are produced by policy, not supplied as authorization facts by the command invocation.
+6. Secret resolution is reachable only from an allow outcome.
+7. Injected secrets are scoped to the authorized child-process execution.
+8. Execution backends do not redefine core policy semantics.
+9. Authorization semantics do not depend on the frontend that supplied the invocation.
+10. iwaya is not represented as a sandbox.
 
 ## Related Work
 

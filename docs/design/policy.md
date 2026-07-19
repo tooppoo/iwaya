@@ -2,7 +2,7 @@
 
 This document defines how iwaya classifies a command, how it authorizes an invocation, and how an authorized invocation obtains its secrets.
 
-It defines semantics only. The concrete configuration syntax and the argument pattern language are derived from the implementation and are documented in the generated configuration reference, so they are not restated here.
+It defines semantics only. The concrete configuration syntax and the argument pattern language are derived from the implementation, and will be documented in a generated configuration reference added alongside it, so they are not restated here.
 
 The durable decisions behind these semantics are recorded in:
 
