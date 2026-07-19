@@ -30,7 +30,7 @@ For example:
 iwaya exec -- your-command --flag value
 ```
 
-See [Getting Started](docs/guide/getting-started.md) for installation, initial configuration, and a complete walkthrough.
+Installation and configuration are documented alongside the implementation they describe.
 
 ## Basic Usage
 
@@ -46,19 +46,15 @@ In v0:
 * only the explicitly invoked command is handled by iwaya;
 * subprocesses started by that command are not automatically intercepted.
 
-See the [CLI Reference](docs/guide/cli.md) for the complete command-line interface and the [Policy Reference](docs/design/policy.md) for command matching and secret handling semantics.
+Whether iwaya manages a command depends on whether it is registered in the configuration, and managed commands are default-deny. See the [Policy Reference](docs/design/policy.md) for classification, command matching, and secret handling semantics.
 
 ## Index for Documents
 
-### Guides and references
-
-* [Getting Started](docs/guide/getting-started.md)
-* [CLI Reference](docs/guide/cli.md)
-* [Configuration Reference](docs/guide/configuration.md)
-* [Policy Reference](docs/design/policy.md)
+Start from [the documentation index](docs/README.md), which explains what to read for a given question.
 
 ### Design and security
 
 * [Security Model and Limitations](docs/design/security-model.md)
+* [Policy Reference](docs/design/policy.md)
 * [Command Proxy Architecture](docs/design/command-proxy.md)
 * [Architecture Decision Records](docs/adr/README.md)

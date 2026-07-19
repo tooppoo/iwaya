@@ -30,13 +30,16 @@ Go has strong standard-library support for process execution and concurrency, an
 
 Rust was also considered because its enums, ownership model, and type system can express closed domain states and secret lifecycles more strictly. However, the currently expected iwaya core is primarily a linear pipeline:
 
-```text
-load and compile configuration
-→ resolve command invocation and backend
-→ evaluate policy
-→ resolve authorized secrets
-→ construct execution plan
-→ execute through the selected backend
+```mermaid
+flowchart TD
+    a["load and compile configuration"]
+    b["resolve command invocation and backend"]
+    c["evaluate policy"]
+    d["resolve authorized secrets"]
+    e["construct execution plan"]
+    f["execute through the selected backend"]
+
+    a --> b --> c --> d --> e --> f
 ```
 
 The current domain model is not expected to require enough state-machine or type-level complexity to outweigh the integration advantages of Go.
@@ -90,18 +93,23 @@ If these conditions arise, the project must evaluate a hybrid architecture in a 
 
 A possible hybrid architecture is:
 
-```text
-Rust core
-  ├─ configuration and domain model
-  ├─ policy evaluation
-  ├─ secret lifecycle orchestration
-  └─ execution planning
-       ↓ explicit internal protocol
-Go container backend helper
-  ├─ Dev Container integration
-  ├─ Docker Go SDK
-  ├─ process creation and attachment
-  └─ TTY and stream handling
+```mermaid
+flowchart TD
+    subgraph rust["Rust core"]
+        r1["configuration and domain model"]
+        r2["policy evaluation"]
+        r3["secret lifecycle orchestration"]
+        r4["execution planning"]
+    end
+
+    subgraph go["Go container backend helper"]
+        g1["Dev Container integration"]
+        g2["Docker Go SDK"]
+        g3["process creation and attachment"]
+        g4["TTY and stream handling"]
+    end
+
+    rust -->|"explicit internal protocol"| go
 ```
 
 This is a reconsideration candidate, not a committed future architecture.
