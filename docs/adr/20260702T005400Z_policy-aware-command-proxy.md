@@ -23,6 +23,7 @@ Related ADRs:
 
 - [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md)
 - [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md)
+- [Distinguish Managed Commands from Unmanaged Pass-Through Commands](20260719T024911Z_managed-commands-default-deny.md) supersedes the no-match fallback below for managed commands.
 
 ## Decision
 
