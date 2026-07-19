@@ -63,16 +63,13 @@ A managed command shim delegates to iwaya core. iwaya core resolves the command 
 
 For example, `gh pr list` inside an iwaya-managed shell may run as:
 
-```txt
-user shell
-  GH_TOKEN absent
-  PATH starts with session shim directory
+```mermaid
+flowchart TD
+    shell["user shell<br>GH_TOKEN absent<br>PATH starts with session shim directory"]
+    shim["session gh shim<br>asks iwaya core to evaluate policy"]
+    real["real gh process<br>GH_TOKEN present only if policy authorizes it"]
 
-session gh shim
-  asks iwaya core to evaluate policy
-
-real gh process
-  GH_TOKEN present only if policy authorizes it
+    shell --> shim --> real
 ```
 
 When no policy matches, iwaya delegates the real command without secret injection.

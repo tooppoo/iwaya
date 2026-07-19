@@ -84,18 +84,12 @@ A future session frontend may route only registered managed commands into iwaya 
 
 Conceptually, both frontends must preserve the same behavior:
 
-```txt
-unmanaged command
-  -> pass through without managed secrets
-
-managed command + allow match
-  -> execute, with optional authorized injection
-
-managed command + deny match
-  -> deny
-
-managed command + no allow match
-  -> deny
+```mermaid
+flowchart TD
+    unmanaged["unmanaged command"] --> passthrough["pass through without managed secrets"]
+    allowMatch["managed command + allow match"] --> executed["execute, with optional authorized injection"]
+    denyMatch["managed command + deny match"] --> denied["deny"]
+    noAllow["managed command + no allow match"] --> denied
 ```
 
 ### Terminology
