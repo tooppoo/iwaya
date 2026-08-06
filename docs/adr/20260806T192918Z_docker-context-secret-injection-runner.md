@@ -23,7 +23,7 @@ Related issue:
 
 Related ADRs:
 
-- [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) remains accepted, and this ADR does not supersede it. Restricting execution to configured contexts and command policies does not make iwaya a sandbox, so its boundary, its non-goals, and its requirement for complementary layers all continue to apply. Of the mitigations that ADR enumerates, this decision replaces the pass-through of unmatched commands and the explicit deny rules for command patterns; the rest remain in force.
+- [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) remains accepted, and this ADR does not supersede it. Restricting execution to configured contexts and command policies does not make iwaya a sandbox, so its boundary, its non-goals, and its requirement for complementary layers all continue to apply. Of the mitigations that ADR enumerates, this decision replaces the pass-through of unmatched commands, the explicit deny rules for command patterns, and the description of injection as reaching only the selected child process; the rest remain in force.
 - [Implement iwaya in Go](20260719T024300Z_implements-iwaya-in-go.md) is unaffected by this decision.
 
 This ADR supersedes:
@@ -66,30 +66,36 @@ Arguments for the target command must be separated by `--`. Everything after `--
 Configuration must be divided into secret providers, Docker execution contexts, and command policies. Each layer answers one question: a provider defines how a secret is obtained, a context defines where a command runs, and a command policy defines which secrets a command receives.
 
 ```kdl
-providers {
+/- kdl-version 2
+
+iwaya version=1 {
+  providers {
     bws "bws-default" {
-        project "philomagi.dev"
+      project "philomagi.dev"
     }
-}
+  }
 
-contexts {
+  contexts {
     docker "iwaya" {
-        runtime "podman"
-        user "vscode"
-        workdir "/workspaces/iwaya"
-        container-name "iwaya-dev"
+      runtime "podman"
+      user "vscode"
+      workdir "/workspaces/iwaya"
+      container-name "iwaya-dev"
     }
-}
+  }
 
-policies {
+  policies {
     command "claude" {
-        secret \
-            "ANTHROPIC_AUTH_TOKEN" \
-            provider="bws-default" \
-            secret-name="ANTHROPIC_AUTH_TOKEN"
+      secret \
+        "ANTHROPIC_AUTH_TOKEN" \
+        provider="bws-default" \
+        secret-name="ANTHROPIC_AUTH_TOKEN"
     }
+  }
 }
 ```
+
+The three layers sit under an `iwaya` root node carrying a configuration `version`, which is what makes the version available to validate before anything below it is read.
 
 A provider must not select contexts or commands. A context must not declare secrets. A command policy must not declare container settings. Keeping the layers separate is what allows one container definition and one command definition to be written once each rather than once per combination.
 
@@ -165,7 +171,7 @@ A diagnostic may identify the provider identifier, the secret name, or the envir
 
 iwaya must pass stdin, stdout, and stderr through to the runtime process, must exit with that process's exit status, and must forward signals to it as far as the platform and the container runtime allow.
 
-Secret injection is the only difference a caller should observe.
+Apart from secret injection and the forced `--interactive` and `--tty` behavior, a caller should observe no difference.
 
 ### The boundary that does not change
 
@@ -188,6 +194,7 @@ This decision does not:
 - separate the command identifier from the executable run inside the container
 - define a noninteractive execution mode or make TTY and stdin behavior configurable
 - reintroduce allow and deny rules, an argument pattern language, or repository-context authorization
+- reintroduce an iwaya-managed shell session, session-scoped or global `PATH` shims, or automatic command interception, all of which remain incompatible with requiring an explicit context and command at the call site
 - define a workflow engine, including pipelines, sequential execution of multiple commands, and conditional branching
 - sandbox the process that receives a secret
 - make iwaya a secret manager or a general-purpose secret retrieval tool
@@ -222,7 +229,7 @@ Neither was selected. Choosing secrets at the invocation returns iwaya to decidi
 
 Under this model, iwaya would place resolved values directly in the runtime argv, which is the shortest path from a resolved secret to a container environment.
 
-This was rejected because the value would then be visible in the host process table to any process running as the same user, and would be captured by any shell history, process accounting, or audit tooling that records argv. Setting the value in the runtime process environment and forwarding only the name costs nothing and avoids that exposure.
+This was rejected because the value would then be visible to any process that can read the host process table, and would be captured by any shell history, process accounting, or audit tooling that records argv. Setting the value in the runtime process environment and forwarding only the name costs nothing and avoids that exposure.
 
 ## Consequences
 
