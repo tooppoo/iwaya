@@ -34,22 +34,101 @@ enozunu config-version=1 {
         }
       }
 
+      skill "reportage" {
+        git {
+          url "https://github.com/tooppoo/reportage"
+          tag "0.0.7"
+          path "ai/skills/reportage"
+        }
+      }
+
+      skill "review-sized-implementation" {
+        git {
+          url "https://github.com/tooppoo/catalog-agent-tools"
+          branch "main"
+          path "common/skills/review-sized-implementation"
+        }
+      }
+
+      // skill "japanese-note" {
+      //   gist {
+      //     id "fd287c3133457c4fd8f5601d34aa817d"
+      //     revision "209db7d6d19bc4727139844c0e8d786542e9ff68"
+      //   }
+      // }
     }
+
+    instructions {
+      claude {
+         git {
+          url "https://github.com/tooppoo/catalog-agent-tools"
+          branch "main"
+          path "instructions/base.md"
+        }       
+      }
+      codex {
+         git {
+          url "https://github.com/tooppoo/catalog-agent-tools"
+          branch "main"
+          path "instructions/base.md"
+        }       
+      }
+    }
+
+    // agents {
+    //   agent "example-agent" {
+    //     git {
+    //       url "https://github.com/your-org/your-agents-repo"
+    //       branch "main"
+    //       path "path/to/agents/example-agent.md"
+    //     }
+    //   }
+    // }
   }
 
   // `consumer` selects what to materialize for each target AI.
   consumer {
     claude {
-      use-skills "documentation-writing" \
-        "subagent-review-loop" \
-        "code-comment" \
-        "cli-output-design"
+      use-skills "documentation-writing" {
+        when "updating documentation"
+        when "writing or modifying code comments"
+      }
+      use-skills "subagent-review-loop" {
+        when "After completing file edits, before reporting completion, unless the user explicitly instructs otherwise"
+      }
+      use-skills "code-comment" {
+        when "writing or modifying code comments"
+      }
+      use-skills "cli-output-design" {
+        when "design or implemnts CLI output"
+      }
+      use-skills "reportage" {
+        when "implments e2e test"
+      }
+      use-skills "review-sized-implementation" {
+        when "during implementation work"
+      }
     }
     codex {
-      use-skills "documentation-writing" \
-        "subagent-review-loop" \
-        "code-comment" \
-        "cli-output-design"
+      use-skills "documentation-writing" {
+        when "updating documentation"
+        when "writing or modifying code comments"
+      }
+      use-skills "subagent-review-loop" {
+        when "After completing file edits, before reporting completion, unless the user explicitly instructs otherwise"
+      }
+      use-skills "code-comment" {
+        when "writing or modifying code comments"
+      }
+      use-skills "cli-output-design" {
+        when "design or implemnts CLI output"
+      }
+      use-skills "reportage" {
+        when "implments e2e test"
+      }
+      use-skills "review-sized-implementation" {
+        when "during implementation work"
+      }
     }
   }
 }
