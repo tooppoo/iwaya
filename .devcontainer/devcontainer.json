@@ -4,9 +4,10 @@
   "workspaceFolder": "/workspaces/iwaya",
   "remoteUser": "vscode",
   "runArgs": [
-    "--init"
+    "--name", "iwaya-dev"
   ],
   "postCreateCommand": "sh scripts/setup-dev.sh",
+  "waitFor": "postCreateCommand",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/tooppoo/catalog-devcontainer-features/git-kura:0": {},
