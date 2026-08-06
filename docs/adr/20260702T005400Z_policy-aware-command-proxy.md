@@ -1,6 +1,6 @@
 # Define iwaya as a Policy-Aware Command Proxy
 
-- Status: Accepted
+- Status: Superseded by [20260806T192918Z_docker-context-secret-injection-runner.md](20260806T192918Z_docker-context-secret-injection-runner.md)
 - Created: 2026-07-02T00:54:00Z
 
 ## Context
@@ -24,6 +24,7 @@ Related ADRs:
 - [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md)
 - [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md)
 - [Distinguish Managed Commands from Unmanaged Pass-Through Commands](20260719T024911Z_managed-commands-default-deny.md) supersedes the no-match fallback below for managed commands.
+- [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) supersedes this decision.
 
 ## Decision
 

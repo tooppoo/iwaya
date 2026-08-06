@@ -21,6 +21,7 @@ Related ADRs:
 
 - [Define iwaya as a Policy-Aware Command Proxy](20260702T005400Z_policy-aware-command-proxy.md)
 - [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md)
+- [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) keeps this non-sandbox boundary in force. Of the mitigations listed below, it replaces the pass-through of unmatched commands and the explicit deny rules for command patterns; the rest continue to apply.
 
 ## Decision
 
