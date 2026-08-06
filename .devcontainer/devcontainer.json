@@ -4,9 +4,13 @@
   "workspaceFolder": "/workspaces/iwaya",
   "remoteUser": "vscode",
   "runArgs": [
-    "--name", "iwaya-dev"
+    "--name", "iwaya-dev",
+    "--userns=keep-id"
   ],
-  "postCreateCommand": "sh scripts/setup-dev.sh",
+  "postCreateCommand": [
+    "sh",
+    "scripts/setup-dev.sh"
+  ],
   "waitFor": "postCreateCommand",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
