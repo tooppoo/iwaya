@@ -1,6 +1,6 @@
 # Distinguish Managed Commands from Unmanaged Pass-Through Commands
 
-- Status: Accepted
+- Status: Superseded by [20260806T133954Z_secret-aware-execution-recipe-runner.md](20260806T133954Z_secret-aware-execution-recipe-runner.md)
 - Created: 2026-07-19T02:49:11Z
 
 ## Context
@@ -27,6 +27,7 @@ Related ADRs:
 - [Define iwaya as a Policy-Aware Command Proxy](20260702T005400Z_policy-aware-command-proxy.md)
 - [Use Explicit Command Execution for v0](20260718T211800Z_explicit-command-execution-for-v0.md)
 - [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md)
+- [Define iwaya as a Secret-Aware Execution Recipe Runner](20260806T133954Z_secret-aware-execution-recipe-runner.md) supersedes this decision.
 
 This ADR supersedes the no-match fallback defined by the policy-aware command proxy ADR where that fallback applies to managed commands.
 
