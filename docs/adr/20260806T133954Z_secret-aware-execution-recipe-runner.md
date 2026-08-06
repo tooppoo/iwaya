@@ -23,7 +23,7 @@ Related issue:
 
 Related ADRs:
 
-- [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) remains accepted. Narrowing execution to named recipes does not make iwaya a sandbox, and the limits recorded there continue to apply.
+- [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) remains accepted, and this ADR does not supersede it. Narrowing execution to named recipes does not make iwaya a sandbox, so its boundary, its non-goals, and its requirement for complementary layers all continue to apply. This ADR does replace the individual mitigations that ADR enumerates — pass-through of unmatched commands, explicit deny rules for command patterns, and isolation contributed by an execution backend — because those mechanisms no longer exist under the recipe model.
 - [Implement iwaya in Go](20260719T024300Z_implements-iwaya-in-go.md) is unaffected by this decision.
 
 This ADR supersedes:
@@ -78,7 +78,7 @@ In v0, the only secret delivery mechanism is injection into the child process en
 
 A raw secret value must not be expanded into the executable, the argument vector, the working directory, a non-secret interpolation, or any other recipe field. In particular, a raw secret must not be embedded in a command-line argument, where it would be visible to any process that can read the process table.
 
-A recipe may name a transport command such as `docker exec`. When it does, the secret must be supplied through the transport process environment and forwarded from there, rather than written into the transport command's arguments.
+A recipe may name a transport command such as `docker exec`. What iwaya guarantees there is only the rule above: no raw secret value is expanded into an argument vector. Constructing the transport so that the value travels through the transport process environment is the recipe author's responsibility. The fixed argument vector may name the variable to forward, as `docker exec -e NAME` does, but it must not carry that variable's value.
 
 The environment variable names declared by the recipe, together with the secret references they map to, are the complete injection mapping. Nothing else constitutes one.
 
@@ -94,9 +94,17 @@ A diagnostic may identify the secret reference or the environment variable name 
 
 A recipe may allow additional arguments. When it does, the arguments supplied at the invocation are appended after the fixed argument vector.
 
+When a recipe does not accept additional arguments, an invocation that supplies them must produce an error, and must not execute anything or resolve any secret. iwaya must not silently discard them, because that would run a command the user did not ask for while a secret is live.
+
 iwaya does not analyze the target CLI's subcommand semantics or option interactions. A fixed command prefix therefore does not, in general, constrain what the target program can be asked to do. A recipe that allows additional arguments delivers its secrets to whatever the target CLI can reach through them.
 
 Recipe authors must evaluate the fixed argument vector and the additional-argument allowance together as the secret-delivery scope they are granting.
+
+### Execution is transparent apart from injection
+
+iwaya must pass stdin, stdout, and stderr through to the child process, must exit with the child's exit status, and must forward signals to the child as far as the platform allows.
+
+Secret injection is the only difference a caller should observe. A recipe is a way to run a command with the secrets it needs, not a wrapper that changes how that command behaves in a script or a terminal.
 
 ### Containers are recipe content, not a core concept
 
