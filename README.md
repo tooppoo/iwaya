@@ -2,9 +2,9 @@
 
 ## Concept
 
-iwaya runs a configured command inside a selected development container, with the secrets that command needs and nothing else.
+iwaya runs a configured command inside a selected development container, delivering only the secrets that command's policy declares.
 
-You choose the container and the command at the call site. iwaya resolves only the secrets the command's policy declares, forwards them into the container for that one execution, and never writes them into the container, your shell, or its own state.
+You choose the container and the command at the call site. iwaya resolves the declared secrets, forwards them into the container for that one execution, and never leaves them behind — not in the container's stored state, not in your shell, not in iwaya's own configuration, logs, or caches.
 
 It exists so that a credential does not have to be left behind: no `gh auth login` inside the container, no token exported into your shell, no `.env` file mounted in.
 
@@ -44,7 +44,7 @@ Both the container and the command are named explicitly:
 * Arguments after `--` are appended unchanged to the target command.
 * An unknown context or an unknown command is an error, and nothing runs. iwaya executes only what is configured.
 
-Configuration has three layers: the providers a secret is fetched from, the containers a command can run in, and the secrets each command receives. See the [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md) for the configuration layers, the execution order, and the secret-delivery constraints.
+Configuration is split so that a container and a command are each defined once, rather than once per combination. See the [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md) for the configuration layers, the execution order, and the secret-delivery constraints.
 
 ## Index for Documents
 
