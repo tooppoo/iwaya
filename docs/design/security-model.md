@@ -33,7 +33,7 @@ iwaya provides no protection against the following.
 
 **Subprocesses of an authorized command.** A secret injected into a child process is inherited by that process's own children according to ordinary operating-system rules. iwaya does not intercept those subprocesses or re-evaluate policy for them.
 
-**Commands invoked outside iwaya.** In v0 only an invocation passed through `iwaya exec --` enters iwaya's boundary. A command run directly from the shell is resolved and executed by the shell and operating system, and iwaya makes no claim over it. This is a deliberate property of the v0 entrypoint, recorded in [Use Explicit Command Execution for v0](../adr/20260718T211800Z_explicit-command-execution-for-v0.md).
+**Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or directly through the container runtime, is resolved and executed without iwaya, and iwaya makes no claim over it.
 
 **Credentials obtained by other means.** An unmanaged command, or a managed command executing under an allow rule, may hold credentials from environment variables, configuration files, keychains, or prior logins. Withholding an iwaya-managed secret does not make such a process unprivileged.
 
@@ -104,6 +104,5 @@ iwaya does not aim to:
 
 ## Related Documents
 
-- [Command Proxy Architecture](command-proxy.md) describes the components and execution flow that implement this boundary.
-- [Policy Reference](policy.md) describes how authorization outcomes are determined.
+- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the configuration, the execution order, and the invariants that implement this boundary.
 - [Architecture Decision Records](../adr/README.md) record why these boundaries were chosen.

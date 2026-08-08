@@ -40,13 +40,7 @@ Commands are executed explicitly through `iwaya exec`:
 iwaya exec -- <command> [args...]
 ```
 
-In v0:
-
-* arguments after `--` identify the command and its arguments;
-* only the explicitly invoked command is handled by iwaya;
-* subprocesses started by that command are not automatically intercepted.
-
-Whether iwaya manages a command depends on whether it is registered in the configuration, and managed commands are default-deny. See the [Policy Reference](docs/design/policy.md) for classification, command matching, and secret handling semantics.
+See the [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md) for the configuration layers, the execution order, and the secret-delivery constraints.
 
 ## Index for Documents
 
@@ -55,6 +49,5 @@ Start from [the documentation index](docs/README.md), which explains what to rea
 ### Design and security
 
 * [Security Model and Limitations](docs/design/security-model.md)
-* [Policy Reference](docs/design/policy.md)
-* [Command Proxy Architecture](docs/design/command-proxy.md)
+* [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md)
 * [Architecture Decision Records](docs/adr/README.md)

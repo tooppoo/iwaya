@@ -6,9 +6,9 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 **If you want to know whether iwaya protects your credentials**, read [Security Model and Limitations](design/security-model.md) first. It states the boundary and, more importantly, what iwaya does not protect against.
 
-**If you want to know when a command is allowed to run**, read [Policy Reference](design/policy.md). It defines managed and unmanaged commands, and the default-deny rule for managed ones.
+**If you want to know what iwaya will run and which secrets it delivers**, read [Docker Execution Context and Command Policy Model](design/docker-execution.md). It defines the three configuration layers, how an invocation selects a container and a command, and the order in which iwaya validates, resolves secrets, and executes.
 
-**If you are implementing or changing iwaya**, read [Command Proxy Architecture](design/command-proxy.md) for the component structure and invariants, then the relevant records in [Architecture Decision Records](adr/README.md) for why those choices were made.
+**If you are implementing or changing iwaya**, read that same document for the invariants an implementation must preserve, then the relevant records in [Architecture Decision Records](adr/README.md) for why those choices were made.
 
 **If you are about to make a decision that future contributors will question**, read [the ADR guide](adr/README.md) before writing code.
 
@@ -16,7 +16,11 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 ### [Design](design/README.md)
 
-Architecture, authorization semantics, and the security boundary. These documents are normative for implementation, and they describe how the system is divided and what must remain true.
+Architecture, the execution and secret-delivery model, and the security boundary. These documents are normative for implementation, and they describe how the system is divided and what must remain true.
+
+### [v0 Scope](v0-scope.md)
+
+The version-specific layer over the design documents: current constraints, deliberate omissions, and open decisions. Unlike the other sections, it is expected to shrink and eventually disappear, so it must not be used as a home for anything durable.
 
 ### [Architecture Decision Records](adr/README.md)
 
@@ -24,7 +28,7 @@ The rationale behind each durable decision, including alternatives that were rej
 
 ### Guides and generated references
 
-User-facing guides and the generated CLI and configuration references are added alongside the implementation they describe. Facts that can be derived from the implementation — command-line options, configuration syntax, the argument pattern language — are generated rather than hand-written, so that they cannot drift from the behavior they document.
+User-facing guides and the generated CLI and configuration references are added alongside the implementation they describe. Facts that can be derived from the implementation — command-line options and the configuration syntax — are generated rather than hand-written, so that they cannot drift from the behavior they document.
 
 ## Conventions
 
