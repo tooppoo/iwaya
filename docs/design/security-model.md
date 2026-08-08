@@ -31,7 +31,7 @@ iwaya provides no protection against the following.
 
 **A command that misuses a secret it was configured to receive.** After injection, the process may print, log, persist, or transmit the value. A command policy fixes delivery; it does not constrain use.
 
-**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. The unit of exposure is the execution and everything it starts, not a single process, and a descendant that outlives the execution keeps the value for as long as it runs.
+**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. The unit of exposure is the process tree rooted at the container command, not a single process. That tree is not bounded by the iwaya invocation either: a descendant that outlives it, such as a daemon the command leaves running, keeps the value for as long as that descendant runs.
 
 **Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or started in the same container through the container runtime, is executed without iwaya, and iwaya makes no claim over it.
 
@@ -45,7 +45,7 @@ iwaya provides no protection against the following.
 
 ## Secret Lifecycle
 
-The intended lifecycle constrains how long a resolved value exists and where it may travel:
+This lifecycle describes how long iwaya holds a resolved value and where it deliberately places it. Only the steps up to the container command are iwaya's to constrain; the inheritance past it is shown because a reader needs to know where the value ends up:
 
 ```mermaid
 flowchart TD
