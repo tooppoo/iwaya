@@ -95,7 +95,7 @@ policies {
 | `provider` | The identifier of the provider that supplies the value |
 | `secret-name` | The name of the secret within that provider |
 
-The command identifier serves two roles at once: it is the name the user types at the invocation, and it is the command name executed inside the container. The model does not separate them.
+The command identifier serves two roles at once: it is the name the user types at the invocation, and it is the command name executed inside the container.
 
 The declared environment variable names, together with the provider and secret name supplying each, are the complete injection mapping. An invocation cannot name a provider, a secret name, or an environment mapping, so the delivery scope is fixed in configuration and reviewable there.
 
@@ -252,7 +252,7 @@ runtime
 + user arguments
 ```
 
-`--interactive` and `--tty` are always present.
+`--interactive` and `--tty` are always present, which is a property of the current release rather than of the model; see [v0 Scope](../v0-scope.md#execution).
 
 An `--env` option must be generated only for an environment variable that the selected command policy declares. No other option may be generated from configuration, and no arbitrary runtime option is passed through, so the argv above is the complete shape of what iwaya builds.
 

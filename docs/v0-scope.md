@@ -4,7 +4,9 @@ This document collects what is true of iwaya only for v0: the constraints that n
 
 It exists so that the design documents can describe the durable model without version-specific qualifications running through them. Everything here is expected to change. When a constraint is lifted or a decision is settled, the entry is removed from this document, and the durable consequence, if any, moves into [the design documents](design/README.md) and a new record in [Architecture Decision Records](adr/README.md).
 
-Nothing here weakens a design document. Where this document and a design document appear to disagree, the design document states the model and this one states how far the current release implements it.
+This document is normative for the current release. An implementation that exceeds one of these constraints is incorrect until the entry is lifted, in the same way that violating a design document is incorrect.
+
+Nothing here weakens a design document, and nothing here is durable. Where this document and a design document appear to disagree, the design document states the model and this one states how far the current release implements it.
 
 ## Execution
 
@@ -20,18 +22,17 @@ BWS is the worked example for the provider layer. Other provider types are expec
 
 ## Deliberately Absent
 
-Each of the following requires its own decision before it is added. None of them is a planned feature.
+Each of the following is absent for now rather than ruled out. Each requires its own decision before it is added, and none of them is a planned feature.
 
 - a local process context, or any generic execution backend abstraction
 - container technologies that do not implement the Docker-compatible `exec` interface
 - selecting a container by ID rather than by name
 - variables and interpolation anywhere in configuration
 - separating the command identifier from the executable run inside the container
-- per-context command restrictions
 - noninteractive execution, or configurable TTY and stdin behavior
-- passing arbitrary runtime-specific options through from configuration or the invocation
-- allow and deny rules, an argument pattern language, or repository-context authorization
 - a secret delivery mechanism other than the container environment
+
+Capabilities the model excludes outright, rather than for now, are not listed here. Allow and deny rules, argument patterns, repository-context authorization, per-context command restrictions, and arbitrary runtime option pass-through are excluded by [the execution model](design/docker-execution.md) itself, with the reasons stated there.
 
 ## Open Decisions
 

@@ -31,4 +31,4 @@ When behavior changes, update the design document that owns the affected questio
 
 Design documents describe current intended behavior. When an ADR is superseded, the superseding decision must be reflected here, because a reader consulting these documents should not have to reconstruct current behavior from a chain of ADRs.
 
-Statements that hold only for the current release do not belong in these documents. A constraint qualified by a version, a capability that is absent for now, and a decision that has not been made yet all belong in [v0 Scope](../v0-scope.md), so that lifting one of them does not require editing the model itself.
+Statements that hold only for the current release do not belong in these documents. A constraint qualified by a version, a capability that is absent for now, and a decision that has not been made yet all belong in [v0 Scope](../v0-scope.md), so that lifting one of them does not require editing the model itself. That document is normative for the current release, and constrains an implementation in the same way these documents do.
