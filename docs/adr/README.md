@@ -12,10 +12,11 @@ Accepted:
 
 * [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) — iwaya's architectural identity, CLI contract, configuration model, and secret-delivery model.
 * [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) — why iwaya must not be described as a sandbox, and what that costs.
-* [Implement iwaya in Go](20260719T024300Z_implements-iwaya-in-go.md) — the implementation language.
+* [Implement iwaya in Rust](20260808T171732Z_implement-iwaya-in-rust.md) — the implementation language.
 
 Superseded, kept as history:
 
+* [Implement iwaya in Go](20260719T024300Z_implements-iwaya-in-go.md) — the language chosen for a container backend iwaya no longer implements, replaced by Rust.
 * [Define iwaya as a Policy-Aware Command Proxy](20260702T005400Z_policy-aware-command-proxy.md) — the original proxy identity, replaced by the Docker-context runner.
 * [Use Explicit Command Execution for v0](20260718T211800Z_explicit-command-execution-for-v0.md) — the `iwaya exec --` entrypoint, replaced by the Docker-context runner.
 * [Distinguish Managed Commands from Unmanaged Pass-Through Commands](20260719T024911Z_managed-commands-default-deny.md) — the managed/unmanaged classification, replaced by the Docker-context runner.
