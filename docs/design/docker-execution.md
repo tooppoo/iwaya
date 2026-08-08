@@ -10,7 +10,9 @@ The security boundary this model operates within is defined in [Security Model a
 
 This document owns the configuration model, the order of validation, secret resolution, and execution, the construction of the runtime invocation, and the invariants an implementation must preserve.
 
-It does not define the CLI output contract. Output formats, exit-code categories, stable error codes, and diagnostic rendering are not decided here; see [Error Behavior](#error-behavior) for what this model does require of a failure, and for the decisions that remain open.
+It does not define the CLI output contract. Output formats, exit-code categories, stable error codes, and diagnostic rendering are not decided here; see [Error Behavior](#error-behavior) for what this model does require of a failure.
+
+It also does not record how far the current release implements the model. Constraints that hold only for v0, the capabilities left out of it, and the decisions still open are collected in [v0 Scope](../v0-scope.md).
 
 The configuration syntax shown here is a baseline example rather than a syntax reference. Once a parser exists, the field-level contract belongs in a generated configuration reference derived from it.
 
@@ -40,7 +42,7 @@ providers {
 
 The node name is the provider type. The first argument is the provider identifier, which must be unique across all provider instances, including instances of different types. Settings a provider type requires belong inside that provider's block.
 
-v0 documents BWS as the worked example. A general parameter model covering providers that do not exist yet must not be designed in advance.
+Each provider type declares what it requires. A general parameter model covering providers that do not exist yet must not be designed in advance.
 
 ### Docker Execution Contexts
 
@@ -57,7 +59,7 @@ contexts {
 }
 ```
 
-The node name `docker` denotes the Docker-compatible `exec` model, which is the only context type in v0.
+The node name `docker` denotes the Docker-compatible `exec` model. A context type is a node name in this block, so adding one is a configuration-model change rather than a new field.
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -67,7 +69,7 @@ The node name `docker` denotes the Docker-compatible `exec` model, which is the 
 | `workdir` | yes | The working directory inside the container |
 | `container-name` | yes | The name of the target container |
 
-`user` and `workdir` are required because the constructed argv always carries `--user` and `--workdir`. v0 has no invocation shape that omits either one, so a context missing them is a configuration error rather than a request to let the container decide.
+`user` and `workdir` are required because the constructed argv always carries `--user` and `--workdir`. No invocation shape omits either one, so a context missing them is a configuration error rather than a request to let the container decide.
 
 `runtime` must be treated as a single executable. It must not be evaluated as a shell command string, so a value containing arguments, redirection, or command separators is a configuration error rather than a way to extend the invocation.
 
@@ -93,11 +95,11 @@ policies {
 | `provider` | The identifier of the provider that supplies the value |
 | `secret-name` | The name of the secret within that provider |
 
-The command identifier serves two roles at once: it is the name the user types at the invocation, and it is the command name executed inside the container. v0 does not separate them.
+The command identifier serves two roles at once: it is the name the user types at the invocation, and it is the command name executed inside the container. The model does not separate them.
 
 The declared environment variable names, together with the provider and secret name supplying each, are the complete injection mapping. An invocation cannot name a provider, a secret name, or an environment mapping, so the delivery scope is fixed in configuration and reviewable there.
 
-A command policy is not an allow or deny rule. v0 has no argument patterns, no rule priority, no fallback, and no repository matching, because none of them would constrain what the target command can do with the credential it received.
+A command policy is not an allow or deny rule. Matching machinery of that kind — argument patterns, rule priority, fallback, repository matching — has no place in the model, because none of it would constrain what the target command can do with the credential it received.
 
 ### Baseline Example
 
@@ -162,7 +164,7 @@ iwaya exec --context git-kura claude -- --resume
 
 `--context` is required. iwaya must not infer a context from the working directory, the repository, or a default entry, because that would let something other than the user decide which container receives a credential.
 
-The command operand must name a configured command policy. Every configured context may be used with every configured command policy, and the pairing is chosen at the invocation rather than fixed in configuration. v0 provides no per-context command restriction.
+The command operand must name a configured command policy. Every configured context may be used with every configured command policy, and the pairing is chosen at the invocation rather than fixed in configuration. There is no per-context command restriction, because a restriction of that kind would read as an authorization rule that iwaya cannot enforce: the same container is reachable through the runtime directly.
 
 Arguments for the target command are separated by `--`. Everything after `--` is appended unchanged to the end of the target command, and iwaya does not interpret it. iwaya does not analyze the target command's subcommands or option interactions, so the fixed part of an invocation does not constrain what the target command can be asked to do once it holds the credential.
 
@@ -250,9 +252,9 @@ runtime
 + user arguments
 ```
 
-`--interactive` and `--tty` are always present. v0 targets interactive development CLIs, and making TTY and stdin behavior configurable is deferred until a concrete need appears.
+`--interactive` and `--tty` are always present.
 
-An `--env` option must be generated only for an environment variable that the selected command policy declares. No other option may be generated from configuration: v0 passes no arbitrary runtime options through, so the argv above is the complete shape of what iwaya builds.
+An `--env` option must be generated only for an environment variable that the selected command policy declares. No other option may be generated from configuration, and no arbitrary runtime option is passed through, so the argv above is the complete shape of what iwaya builds.
 
 ## Environment Injection Constraints
 
@@ -278,11 +280,7 @@ A diagnostic must identify what failed precisely enough to act on. Naming the pr
 
 Failure causes must be distinguishable from one another. A configuration that does not parse, an unknown context, an unknown command, a provider that rejected a request, and a container that is not running call for different corrective actions, and a diagnostic that does not separate them leaves the user guessing.
 
-The following are not decided by this document, and must be settled before the CLI is implemented:
-
-- the output formats iwaya supports, and the structure of machine-readable output
-- the exit-code categories, and the stable error codes within them
-- how iwaya's own failure exit codes coexist with passing through the exit status of the process it ran
+How that distinction is surfaced — output formats, exit-code categories, and stable error codes — is not decided yet, and is tracked in [v0 Scope](../v0-scope.md#open-decisions).
 
 ## Process Behavior
 
@@ -304,23 +302,8 @@ Apart from secret injection and the forced `--interactive` and `--tty` behavior,
 10. A policy-managed environment variable is never satisfied by the invoking environment, whether by inheritance or by fallback.
 11. iwaya is not represented as a sandbox.
 
-## v0 Limits
-
-v0 is limited to Docker-compatible execution. `runtime` accepts `docker`, `podman`, or another command implementing the same `exec` interface, and that is the whole of the execution model.
-
-The following are deliberately absent from v0, and each requires its own decision before being added:
-
-- a local process context, or any generic execution backend abstraction
-- container technologies that do not implement the Docker-compatible `exec` interface
-- selecting a container by ID rather than by name
-- variables and interpolation anywhere in configuration
-- separating the command identifier from the executable run inside the container
-- per-context command restrictions
-- noninteractive execution, or configurable TTY and stdin behavior
-- passing arbitrary runtime-specific options through from configuration or the invocation
-- allow and deny rules, an argument pattern language, or repository-context authorization
-
 ## Related Documents
 
 - [Security Model and Limitations](security-model.md) defines what this model does and does not protect against.
+- [v0 Scope](../v0-scope.md) records how far the current release implements this model, and what is deliberately absent from it.
 - [Architecture Decision Records](../adr/README.md) record why these choices were made.

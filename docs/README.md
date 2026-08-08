@@ -10,6 +10,8 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 **If you are implementing or changing iwaya**, read that same document for the invariants an implementation must preserve, then the relevant records in [Architecture Decision Records](adr/README.md) for why those choices were made.
 
+**If you want to know whether a capability exists yet**, read [v0 Scope](v0-scope.md). The design documents describe the durable model; that one records how far the current release implements it, what is deliberately absent, and which decisions are still open.
+
 **If you are about to make a decision that future contributors will question**, read [the ADR guide](adr/README.md) before writing code.
 
 ## Sections
@@ -17,6 +19,10 @@ This directory holds the durable documentation for iwaya. The project overview a
 ### [Design](design/README.md)
 
 Architecture, the execution and secret-delivery model, and the security boundary. These documents are normative for implementation, and they describe how the system is divided and what must remain true.
+
+### [v0 Scope](v0-scope.md)
+
+The version-specific layer over the design documents: current constraints, deliberate omissions, and open decisions. Unlike the other sections, it is expected to shrink and eventually disappear, so it must not be used as a home for anything durable.
 
 ### [Architecture Decision Records](adr/README.md)
 
