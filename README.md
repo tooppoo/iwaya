@@ -4,9 +4,9 @@
 
 iwaya runs a configured command inside a selected development container, delivering only the secrets that command's policy declares.
 
-You choose the container and the command at the call site. iwaya resolves the declared secrets, forwards them into the container for that one execution, and never leaves them behind — not in the container's stored state, not in your shell, not in iwaya's own configuration, logs, or caches.
+You choose the container and the command at the call site. iwaya resolves the declared secrets and forwards them into the container for that one execution. iwaya itself writes the raw value nowhere: not into container login state, not into your shell, not into its own configuration, logs, or caches. What the command does with the value once it has it is outside iwaya's control.
 
-It exists so that a credential does not have to be left behind: no `gh auth login` inside the container, no token exported into your shell, no `.env` file mounted in.
+It exists so that you do not have to leave a credential behind yourself: no `gh auth login` inside the container, no token exported into your shell, no `.env` file mounted in.
 
 iwaya is a mitigation layer, not a security sandbox. It does not guarantee containment of malicious commands or prevent every possible form of secret exfiltration.
 
