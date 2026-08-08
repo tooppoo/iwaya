@@ -10,7 +10,7 @@ The durable decisions behind this boundary are recorded in [Treat iwaya as a Mit
 
 iwaya is a mitigation layer. It is not a sandbox, and it does not contain hostile code.
 
-The distinction matters because the two provide different guarantees. A sandbox constrains what a running process is able to do. iwaya instead constrains which executions receive a secret, and for how long. Once a process holds a secret, iwaya has no further control over it.
+The distinction matters because the two provide different guarantees. A sandbox constrains what a running process is able to do. iwaya instead constrains which executions receive a secret at all. Once a process holds a secret, iwaya has no further control over it, including how long it keeps it.
 
 iwaya must never be described as a sandbox, an isolation layer, or a containment mechanism.
 
@@ -31,7 +31,7 @@ iwaya provides no protection against the following.
 
 **A command that misuses a secret it was configured to receive.** After injection, the process may print, log, persist, or transmit the value. A command policy fixes delivery; it does not constrain use.
 
-**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. Exposure is scoped to one execution, not to one process.
+**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. The unit of exposure is the execution and everything it starts, not a single process, and a descendant that outlives the execution keeps the value for as long as it runs.
 
 **Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or started in the same container through the container runtime, is executed without iwaya, and iwaya makes no claim over it.
 
@@ -61,7 +61,7 @@ flowchart TD
     container -->|"ordinary inheritance"| descendants
 ```
 
-Resolution must not precede validation. An invocation that will not run must not cause a secret to be fetched, because retrieval itself may be observable to the provider or to an intermediary.
+Resolution never precedes validation, as required by [the execution order](docker-execution.md#validation-precedes-secret-resolution). The security reason for that order is that retrieval is observable to the provider and to any intermediary, so an invocation that will not run must leave no trace of having asked.
 
 Raw secret values must not be written to:
 
@@ -71,7 +71,7 @@ Raw secret values must not be written to:
 - persistent caches
 - shell history
 - the command line of any process, including the container runtime command iwaya builds
-- any process environment other than the container runtime process iwaya starts
+- any process environment other than the container runtime process iwaya starts and the container execution it forwards the names into
 - command-specific persistent login state created by iwaya
 
 The invoking shell is one of the environments a raw value must never reach. iwaya delivers a secret to the execution it was asked to run, and never back to its caller.
