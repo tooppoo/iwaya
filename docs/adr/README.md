@@ -4,6 +4,23 @@ This directory contains Architecture Decision Records (ADRs).
 
 An ADR records a decision that affects the architecture, public contract, operational model, or long-term maintainability of the project. It should explain not only what was decided, but why the decision was made and what trade-offs were accepted.
 
+## Records
+
+For current behavior, read [the design documents](../design/README.md). These records explain why that behavior was chosen, and what was decided before it. Each ADR's own `Status` field is authoritative; the grouping below is for navigation.
+
+Accepted:
+
+* [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) — iwaya's architectural identity, CLI contract, configuration model, and secret-delivery model.
+* [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) — why iwaya must not be described as a sandbox, and what that costs.
+* [Implement iwaya in Go](20260719T024300Z_implements-iwaya-in-go.md) — the implementation language.
+
+Superseded, kept as history:
+
+* [Define iwaya as a Policy-Aware Command Proxy](20260702T005400Z_policy-aware-command-proxy.md) — the original proxy identity, replaced by the Docker-context runner.
+* [Use Explicit Command Execution for v0](20260718T211800Z_explicit-command-execution-for-v0.md) — the `iwaya exec --` entrypoint, replaced by the Docker-context runner.
+* [Distinguish Managed Commands from Unmanaged Pass-Through Commands](20260719T024911Z_managed-commands-default-deny.md) — the managed/unmanaged classification, replaced by the Docker-context runner.
+* [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md) — the managed shell session, replaced by explicit execution and not reinstated since.
+
 ## When to Write an ADR
 
 Write an ADR when a decision affects one or more of the following:

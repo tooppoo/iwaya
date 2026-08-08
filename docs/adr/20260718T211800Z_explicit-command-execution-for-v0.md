@@ -1,6 +1,6 @@
 # Use Explicit Command Execution for v0
 
-- Status: Accepted
+- Status: Superseded by [20260806T192918Z_docker-context-secret-injection-runner.md](20260806T192918Z_docker-context-secret-injection-runner.md)
 - Created: 2026-07-18T21:18:00Z
 
 ## Context
@@ -20,6 +20,7 @@ Related ADRs:
 - [Define iwaya as a Policy-Aware Command Proxy](20260702T005400Z_policy-aware-command-proxy.md)
 - [Use Session-Scoped PATH Shims for Transparent Command Proxying](20260702T005500Z_session-scoped-path-shims.md)
 - [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md)
+- [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) supersedes this decision.
 
 ## Decision
 
