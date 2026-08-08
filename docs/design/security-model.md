@@ -23,19 +23,13 @@ iwaya is designed to reduce the following forms of credential exposure:
 - unnecessary secret delivery to commands that do not require the credential
 - manual credential selection errors, such as using a broadly scoped token where a narrow one would suffice
 
-Each of these is an exposure reduced by construction rather than a property enforced against an adversary.
-
 ## What iwaya Does Not Protect Against
 
 iwaya provides no protection against the following.
 
 **A command that misuses a secret it was configured to receive.** After injection, the process may print, log, persist, or transmit the value. A command policy fixes delivery; it does not constrain use.
 
-**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. The unit of exposure is the process tree rooted at the container command, not a single process. That tree is not bounded by the iwaya invocation either: a descendant that outlives it, such as a daemon the command leaves running, keeps the value for as long as that descendant runs.
-
-**Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or started in the same container through the container runtime, is executed without iwaya, and iwaya makes no claim over it.
-
-**The container a credential is carried into.** Every configured command policy may be paired with every configured context, so a credential is delivered as narrowly as the set of configured contexts allows and no more narrowly. iwaya does not restrict which container a policy's secrets may enter.
+**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them.
 
 **Credentials obtained by other means.** The command iwaya runs may already hold credentials from environment variables, configuration files, keychains, or prior logins inside the container. Withholding a policy-managed secret does not make such a process unprivileged.
 
@@ -85,31 +79,6 @@ Configuration fixes what may be delivered and where. A command policy names the 
 That entitlement remains with the configured external secret provider, which is also responsible for storage, encryption, authentication, rotation, provider-side authorization, and provider-side audit behavior. iwaya is a client of that system, not a replacement for it. Both the configuration and the provider must permit a delivery for it to happen.
 
 The container boundary belongs to the container runtime. iwaya runs commands inside a container, but that isolation is the runtime's property and is not a guarantee iwaya makes.
-
-## Complementary Layers
-
-Because iwaya cannot constrain the process it starts, meaningful protection requires additional layers:
-
-- narrowly scoped credentials, so that an exposed secret grants little
-- provider-side authorization and audit, so that misuse is attributable
-- operating-system permissions and user separation
-- container or virtual-machine isolation for untrusted code
-- sandboxing, when execution of untrusted code is genuinely required
-- code review of the commands and scripts being run
-
-iwaya is intended to compose with these layers rather than substitute for any of them.
-
-## Non-Goals
-
-iwaya does not aim to:
-
-- contain malicious commands or scripts
-- prevent every form of secret exfiltration
-- act as a secret manager, or a general-purpose secret retrieval tool
-- act as a general shell execution allowlist
-- guarantee that a configured command handles an injected secret safely
-
-Running only configured commands follows from the configuration model, not from a containment claim. It restricts what iwaya will start; it does not restrict what can be started.
 
 ## Related Documents
 
