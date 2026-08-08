@@ -104,6 +104,5 @@ iwaya does not aim to:
 
 ## Related Documents
 
-- [Command Proxy Architecture](command-proxy.md) describes the components and execution flow that implement this boundary.
-- [Policy Reference](policy.md) describes how authorization outcomes are determined.
+- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the configuration, the execution order, and the invariants that implement this boundary.
 - [Architecture Decision Records](../adr/README.md) record why these boundaries were chosen.
