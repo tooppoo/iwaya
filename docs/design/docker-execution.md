@@ -12,8 +12,6 @@ This document owns the configuration model, the order of validation, secret reso
 
 It does not define the CLI output contract. Output formats, exit-code categories, stable error codes, and diagnostic rendering are not decided here; see [Error Behavior](#error-behavior) for what this model does require of a failure.
 
-It also does not record how far the current release implements the model. Constraints that hold only for v0, the capabilities left out of it, and the decisions still open are collected in [v0 Scope](../v0-scope.md).
-
 The configuration syntax shown here is a baseline example rather than a syntax reference. Once a parser exists, the field-level contract belongs in a generated configuration reference derived from it.
 
 ## The Three Configuration Layers
@@ -252,7 +250,7 @@ runtime
 + user arguments
 ```
 
-`--interactive` and `--tty` are always present, which is a property of the current release rather than of the model; see [v0 Scope](../v0-scope.md#execution).
+`--interactive` and `--tty` are always present.
 
 An `--env` option must be generated only for an environment variable that the selected command policy declares. No other option may be generated from configuration, and no arbitrary runtime option is passed through, so the argv above is the complete shape of what iwaya builds.
 
@@ -280,8 +278,6 @@ A diagnostic must identify what failed precisely enough to act on. Naming the pr
 
 Failure causes must be distinguishable from one another. A configuration that does not parse, an unknown context, an unknown command, a provider that rejected a request, and a container that is not running call for different corrective actions, and a diagnostic that does not separate them leaves the user guessing.
 
-How that distinction is surfaced — output formats, exit-code categories, and stable error codes — is not decided yet, and is tracked in [v0 Scope](../v0-scope.md#open-decisions).
-
 ## Process Behavior
 
 When the runtime command runs, iwaya passes stdin, stdout, and stderr through to it, exits with its exit status, and forwards signals to it as far as the platform and the container runtime allow.
@@ -305,5 +301,4 @@ Apart from secret injection and the forced `--interactive` and `--tty` behavior,
 ## Related Documents
 
 - [Security Model and Limitations](security-model.md) defines what this model does and does not protect against.
-- [v0 Scope](../v0-scope.md) records how far the current release implements this model, and what is deliberately absent from it.
 - [Architecture Decision Records](../adr/README.md) record why these choices were made.

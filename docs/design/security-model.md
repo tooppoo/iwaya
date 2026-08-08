@@ -33,7 +33,7 @@ iwaya provides no protection against the following.
 
 **Subprocesses of an authorized command.** A secret injected into a child process is inherited by that process's own children according to ordinary operating-system rules. iwaya does not intercept those subprocesses or re-evaluate policy for them.
 
-**Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or directly through the container runtime, is resolved and executed without iwaya, and iwaya makes no claim over it. The entrypoint that exists today is recorded in [v0 Scope](../v0-scope.md#execution).
+**Commands invoked outside iwaya.** Only an invocation passed through iwaya enters iwaya's boundary. A command run directly from the shell, or directly through the container runtime, is resolved and executed without iwaya, and iwaya makes no claim over it.
 
 **Credentials obtained by other means.** An unmanaged command, or a managed command executing under an allow rule, may hold credentials from environment variables, configuration files, keychains, or prior logins. Withholding an iwaya-managed secret does not make such a process unprivileged.
 

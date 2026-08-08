@@ -10,8 +10,6 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 **If you are implementing or changing iwaya**, read that same document for the invariants an implementation must preserve, then the relevant records in [Architecture Decision Records](adr/README.md) for why those choices were made.
 
-**If you want to know whether a capability exists yet**, read [v0 Scope](v0-scope.md). The design documents describe the durable model; that one records how far the current release implements it, what is deliberately absent, and which decisions are still open.
-
 **If you are about to make a decision that future contributors will question**, read [the ADR guide](adr/README.md) before writing code.
 
 ## Sections

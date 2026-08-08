@@ -20,7 +20,6 @@ Each document owns a distinct question, and none restates another:
 |---|---|
 | What does iwaya guarantee, and what does it not? | [Security Model and Limitations](security-model.md) |
 | What may run where, which secrets does it receive, and in what order does that happen? | [Docker Execution Context and Command Policy Model](docker-execution.md) |
-| How far does the current release implement that, and what is still open? | [v0 Scope](../v0-scope.md) |
 | Why was it decided this way? | [Architecture Decision Records](../adr/README.md) |
 
 Exact syntax and option-level contracts belong in generated references derived from the implementation, not in these documents.
@@ -31,4 +30,4 @@ When behavior changes, update the design document that owns the affected questio
 
 Design documents describe current intended behavior. When an ADR is superseded, the superseding decision must be reflected here, because a reader consulting these documents should not have to reconstruct current behavior from a chain of ADRs.
 
-Statements that hold only for the current release do not belong in these documents. A constraint qualified by a version, a capability that is absent for now, and a decision that has not been made yet all belong in [v0 Scope](../v0-scope.md), so that lifting one of them does not require editing the model itself. That document is normative for the current release, and constrains an implementation in the same way these documents do.
+These documents state current decisions only. A constraint qualified by a version, a capability that is absent for now, and a decision that has not been made yet do not belong here, because a reader cannot tell which parts of a model are settled when the two are mixed.
