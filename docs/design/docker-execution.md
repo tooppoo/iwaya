@@ -59,13 +59,15 @@ contexts {
 
 The node name `docker` denotes the Docker-compatible `exec` model, which is the only context type in v0.
 
-| Field | Meaning |
-|---|---|
-| first argument | The context identifier, which must be unique |
-| `runtime` | The Docker-compatible command to invoke. Defaults to `docker` |
-| `user` | The user the command runs as inside the container |
-| `workdir` | The working directory inside the container |
-| `container-name` | The name of the target container |
+| Field | Required | Meaning |
+|---|---|---|
+| first argument | yes | The context identifier, which must be unique |
+| `runtime` | no | The Docker-compatible command to invoke. Defaults to `docker` |
+| `user` | yes | The user the command runs as inside the container |
+| `workdir` | yes | The working directory inside the container |
+| `container-name` | yes | The name of the target container |
+
+`user` and `workdir` are required because the constructed argv always carries `--user` and `--workdir`. v0 has no invocation shape that omits either one, so a context missing them is a configuration error rather than a request to let the container decide.
 
 `runtime` must be treated as a single executable. It must not be evaluated as a shell command string, so a value containing arguments, redirection, or command separators is a configuration error rather than a way to extend the invocation.
 
@@ -194,9 +196,11 @@ Validation must cover at least:
 - the configuration root and its version
 - the uniqueness of provider, context, and command identifiers
 - the existence of the selected context and the selected command policy
-- the required fields of the selected Docker context
-- the uniqueness of environment variable names within the selected command policy
+- the required fields of every Docker context
+- the uniqueness of environment variable names within each command policy
 - the existence of every provider a command policy references
+
+Apart from the existence of the selected entries, validation covers the whole configuration rather than only the entries this invocation uses. A defect in an unselected context or policy is reported when it is introduced, not on the first invocation that happens to reach it.
 
 If validation fails, no secret is resolved and the runtime command does not run. Resolution is itself observable to the provider, so a request whose result cannot be used must not be made.
 
@@ -262,9 +266,15 @@ Where the secret can travel after that is a property of the operating system and
 
 ## Error Behavior
 
-Every failure in this model shares one property: iwaya either has not resolved a secret yet, or has resolved secrets and not executed anything. There is no state in which a container has been given a partial or substituted set of credentials.
+Every failure in this model shares one property: no container is ever given a partial or substituted set of credentials.
 
-A diagnostic must identify what failed precisely enough to act on. Naming the provider identifier, the secret name, the environment variable name, the context, the command, or the configuration location is required where it is available. A raw secret value must never appear in a diagnostic, a log, or any other output, in any verbosity level.
+Failures occur at three stages, and each stage constrains what must not happen afterwards.
+
+- **Validation.** No secret is resolved, and nothing is executed.
+- **Secret resolution.** Nothing is executed, no already-resolved value is delivered anywhere, and no policy-managed variable falls back to the invoking environment.
+- **Execution.** The runtime may fail to start, or exit before the target command runs, for reasons this model does not control: a `runtime` binary that is missing, a container that is not running, a `user` or `workdir` the container rejects. iwaya reports the failure. It must not retry with a different credential set, re-resolve, or fall back to the invoking environment.
+
+A diagnostic must identify what failed precisely enough to act on. Naming the provider identifier, the secret name, the environment variable name, the context, the command, or the configuration location is required where it is available, and a diagnostic must never carry a raw secret value. Where raw values must not be written more generally is defined by [the security model](security-model.md#secret-lifecycle).
 
 Failure causes must be distinguishable from one another. A configuration that does not parse, an unknown context, an unknown command, a provider that rejected a request, and a container that is not running call for different corrective actions, and a diagnostic that does not separate them leaves the user guessing.
 
@@ -289,7 +299,7 @@ Apart from secret injection and the forced `--interactive` and `--tty` behavior,
 5. An invocation cannot introduce a provider, a secret, or an environment mapping.
 6. Validation completes before any secret is resolved.
 7. Every declared secret resolves before the runtime command is executed, and only declared secrets are resolved.
-8. Raw secret values exist only in the environment of the runtime process and inside the container; they never enter argv, configuration, logs, caches, or credential state.
+8. Raw secret values never enter the runtime argv, and exist only in the environment of the runtime process and inside the container. Where else they must not be written is defined by [the security model](security-model.md#secret-lifecycle).
 9. An `--env` option exists only for an environment variable declared by the selected command policy.
 10. A policy-managed environment variable is never satisfied by the invoking environment, whether by inheritance or by fallback.
 11. iwaya is not represented as a sandbox.

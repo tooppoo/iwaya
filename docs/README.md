@@ -16,7 +16,7 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 ### [Design](design/README.md)
 
-Architecture, authorization semantics, and the security boundary. These documents are normative for implementation, and they describe how the system is divided and what must remain true.
+Architecture, the execution and secret-delivery model, and the security boundary. These documents are normative for implementation, and they describe how the system is divided and what must remain true.
 
 ### [Architecture Decision Records](adr/README.md)
 
