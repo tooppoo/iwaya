@@ -1,7 +1,7 @@
 # Implement iwaya in Go
 
-* Status: Accepted
-* Created: 2026-07-19T02:00:08Z
+- Status: Superseded by [20260808T171732Z_implement-iwaya-in-rust.md](20260808T171732Z_implement-iwaya-in-rust.md)
+- Created: 2026-07-19T02:00:08Z
 
 ## Context
 
