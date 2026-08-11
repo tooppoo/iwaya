@@ -38,6 +38,7 @@ pub fn build_argv(
     argv
 }
 
+#[derive(Debug)]
 pub struct ExecError {
     pub runtime: String,
     pub source: std::io::Error,

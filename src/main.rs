@@ -27,6 +27,9 @@ const EXIT_UNKNOWN_SELECTION: u8 = 4;
 const EXIT_RESOLUTION: u8 = 5;
 const EXIT_EXECUTION: u8 = 6;
 
+// Debug is safe here: no variant carries a `Secret`, and `Secret` itself has
+// no `Debug` for a wrapper to derive one through.
+#[derive(Debug)]
 enum Failure {
     Usage(String),
     Config(config::ConfigError),
@@ -187,4 +190,61 @@ fn exec_and_never_return(args: Vec<String>) -> Failure {
         .collect();
 
     Failure::Execution(run::exec_runtime(context, policy, environment, &invocation.args))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Invocation, Failure> {
+        parse_invocation(args.iter().map(|a| a.to_string()).collect())
+    }
+
+    fn usage_detail(args: &[&str]) -> String {
+        match parse(args) {
+            Err(Failure::Usage(detail)) => detail,
+            Err(_) => panic!("expected a usage failure"),
+            Ok(_) => panic!("expected an error"),
+        }
+    }
+
+    #[test]
+    fn parses_the_documented_invocations() {
+        let invocation = parse(&["exec", "--context", "iwaya", "claude"]).unwrap();
+        assert_eq!(invocation.context, ContextId::new("iwaya"));
+        assert_eq!(invocation.command, CommandId::new("claude"));
+        assert_eq!(invocation.args, Vec::<String>::new());
+
+        let invocation =
+            parse(&["exec", "--context", "git-kura", "claude", "--", "--resume"]).unwrap();
+        assert_eq!(invocation.context, ContextId::new("git-kura"));
+        assert_eq!(invocation.command, CommandId::new("claude"));
+        assert_eq!(invocation.args, ["--resume"]);
+    }
+
+    #[test]
+    fn everything_after_the_separator_is_appended_unchanged() {
+        let invocation = parse(&[
+            "exec", "--context", "c", "cmd", "--", "--context", "other", "--", "-x",
+        ])
+        .unwrap();
+        assert_eq!(invocation.args, ["--context", "other", "--", "-x"]);
+    }
+
+    #[test]
+    fn rejects_malformed_invocations() {
+        assert!(usage_detail(&[]).contains("subcommand"));
+        assert!(usage_detail(&["run"]).contains("unknown subcommand"));
+        assert!(usage_detail(&["exec", "cmd"]).contains("'--context' is required"));
+        assert!(usage_detail(&["exec", "--context"]).contains("requires a value"));
+        assert!(
+            usage_detail(&["exec", "--context", "a", "--context", "b", "cmd"])
+                .contains("more than once")
+        );
+        assert!(usage_detail(&["exec", "--context", "c"]).contains("command operand is required"));
+        assert!(usage_detail(&["exec", "--context", "c", "-v", "cmd"]).contains("unknown option"));
+        assert!(
+            usage_detail(&["exec", "--context", "c", "cmd", "extra"]).contains("after '--'")
+        );
+    }
 }

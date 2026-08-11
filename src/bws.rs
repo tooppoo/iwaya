@@ -15,6 +15,7 @@ use serde::Deserialize;
 use crate::config::{BwsProvider, SecretName};
 use crate::secret::Secret;
 
+#[derive(Debug)]
 pub enum ResolveError {
     AcquisitionStart {
         provider: String,
@@ -128,28 +129,32 @@ pub fn resolve(
             project: provider.project.clone(),
         })?;
 
+    // The `bws` CLI has no name-based single-secret read: `secret get` takes
+    // a UUID that only `secret list` reveals, and `secret list` already
+    // returns every value in the project. The wholesale response is therefore
+    // a CLI constraint, not a choice; values of undeclared secrets are
+    // dropped here, in the same pass that parses them, and never wrapped
+    // into a `Secret` that could travel further.
     let secrets: Vec<BwsSecret> = bws_json(
         provider,
         &token,
         &["secret", "list", &project.id],
         "list secrets",
     )?;
-    let by_key: HashMap<String, Secret> = secrets
+    let resolved: HashMap<SecretName, Secret> = secrets
         .into_iter()
-        .map(|s| (s.key, Secret::new(s.value)))
+        .filter(|s| names.iter().any(|name| name.as_str() == s.key))
+        .map(|s| (SecretName::new(&s.key), Secret::new(s.value)))
         .collect();
 
-    let mut resolved = HashMap::new();
     for name in names {
-        let value = by_key
-            .get(name.as_str())
-            .cloned()
-            .ok_or_else(|| ResolveError::UnknownSecret {
+        if !resolved.contains_key(name) {
+            return Err(ResolveError::UnknownSecret {
                 provider: provider.id.to_string(),
                 project: provider.project.clone(),
                 secret_name: name.to_string(),
-            })?;
-        resolved.insert((*name).clone(), value);
+            });
+        }
     }
     Ok(resolved)
 }
@@ -228,11 +233,23 @@ fn bws_json<T: serde::de::DeserializeOwned>(
         })?;
 
     if !output.status.success() {
+        // stderr here is third-party content iwaya does not construct, so the
+        // no-credential guarantee cannot be proven for it; bounding it to one
+        // truncated line limits what an unexpected `bws` message could carry.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let first_line: String = stderr
+            .trim()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect();
         return Err(ResolveError::CliFailed {
             provider: provider.id.to_string(),
             action: action.to_string(),
             status: output.status.to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            stderr: first_line,
         });
     }
 

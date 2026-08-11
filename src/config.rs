@@ -128,6 +128,7 @@ pub struct SecretSpec {
 /// A configuration that does not parse and a configuration that parses but
 /// violates the model call for different corrective actions, so they are
 /// distinct variants.
+#[derive(Debug)]
 pub enum ConfigError {
     Read { path: String, source: std::io::Error },
     Parse { path: String, message: String },
@@ -368,10 +369,16 @@ fn parse_context(node: &KdlNode) -> Result<DockerContext, ParseFailure> {
     }
 
     let runtime = runtime.unwrap_or_else(|| "docker".to_string());
-    // A runtime carrying arguments or shell syntax would extend the invocation
-    // beyond the model's fixed argv shape, so it is a configuration error
-    // (docs/design/configuration.md, "Docker Execution Contexts").
-    if runtime.chars().any(char::is_whitespace) {
+    // A runtime carrying arguments, redirection, or command separators would
+    // extend the invocation beyond the model's fixed argv shape, so it is a
+    // configuration error (docs/design/configuration.md, "Docker Execution
+    // Contexts"). Quotes and expansion characters are rejected with them:
+    // they only make sense in a shell command string, which a runtime is not.
+    if runtime.is_empty()
+        || runtime
+            .chars()
+            .any(|c| c.is_whitespace() || ";|&<>'\"`$\\".contains(c))
+    {
         return invalid(format!(
             "{owner} has a 'runtime' that is not a single executable"
         ));
@@ -441,6 +448,16 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
         if !context_ids.insert(&context.id) {
             return invalid(format!("duplicate context identifier '{}'", context.id));
         }
+        // The container name fills the first positional argv slot after the
+        // option pairs, so a leading '-' would be consumed by the runtime as
+        // an exec option — an arbitrary option passed through configuration,
+        // which the invocation-construction rule forbids.
+        if context.container_name.is_empty() || context.container_name.starts_with('-') {
+            return invalid(format!(
+                "context '{}' has a 'container-name' that is not a container name",
+                context.id
+            ));
+        }
     }
 
     let mut command_ids = std::collections::HashSet::new();
@@ -448,9 +465,31 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
         if !command_ids.insert(&policy.id) {
             return invalid(format!("duplicate command identifier '{}'", policy.id));
         }
+        // The command identifier is executed inside the container and also
+        // occupies a positional argv slot; a leading '-' would read as an
+        // option to the runtime rather than a command name.
+        if policy.id.as_str().is_empty() || policy.id.as_str().starts_with('-') {
+            return invalid(format!(
+                "command '{}' has an identifier that is not a command name",
+                policy.id
+            ));
+        }
 
         let mut env_names = std::collections::HashSet::new();
         for secret in &policy.secrets {
+            // '=' would turn the generated `--env NAME` into the forbidden
+            // `--env NAME=VALUE` shape; '-' would read as an option.
+            let name = secret.env_name.as_str();
+            if name.is_empty()
+                || name.starts_with('-')
+                || name.contains('=')
+                || name.contains('\0')
+            {
+                return invalid(format!(
+                    "command '{}' declares '{}', which is not an environment variable name",
+                    policy.id, secret.env_name
+                ));
+            }
             if !env_names.insert(&secret.env_name) {
                 return invalid(format!(
                     "command '{}' declares environment variable '{}' more than once",
@@ -619,6 +658,56 @@ iwaya version=1 {
                }"#,
         );
         assert!(message.contains("acquisition"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_runtime_containing_a_command_separator() {
+        let message = invalid_message(
+            r#"iwaya version=1 {
+                 contexts {
+                   docker "c" { runtime "podman;rm"; user "u"; workdir "/w"; container-name "n" }
+                 }
+               }"#,
+        );
+        assert!(message.contains("single executable"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_container_name_that_reads_as_an_option() {
+        let message = invalid_message(
+            r#"iwaya version=1 {
+                 contexts {
+                   docker "c" { user "u"; workdir "/w"; container-name "--privileged" }
+                 }
+               }"#,
+        );
+        assert!(message.contains("container-name"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_command_identifier_that_reads_as_an_option() {
+        let message = invalid_message(
+            r#"iwaya version=1 {
+                 policies { command "--help" { } }
+               }"#,
+        );
+        assert!(message.contains("command name"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_environment_variable_name_carrying_a_value() {
+        let message = invalid_message(
+            r#"iwaya version=1 {
+                 providers { bws "b" { project "p"; access-token { exec "true" } } }
+                 policies {
+                   command "c" { secret "FOO=bar" provider="b" secret-name="x" }
+                 }
+               }"#,
+        );
+        assert!(
+            message.contains("not an environment variable name"),
+            "{message}"
+        );
     }
 
     #[test]
