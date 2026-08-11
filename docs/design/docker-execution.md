@@ -42,6 +42,8 @@ The node name is the provider type. The first argument is the provider identifie
 
 Each provider type declares what it requires. A general parameter model covering providers that do not exist yet must not be designed in advance.
 
+The example above omits the `bws` provider's required `access-token` block to show the shape shared by every provider type; see [Provider Credentials](#provider-credentials) below for the settings `bws` itself requires.
+
 #### Provider Credentials
 
 A provider type may require a credential of its own before it can resolve any secret. A provider credential authenticates the provider's client to its backend. It is not among the values the provider resolves, and it is never delivered to a command policy.
@@ -148,6 +150,10 @@ iwaya version=1 {
   providers {
     bws "bws-default" {
       project "philomagi.dev"
+
+      access-token {
+        exec "pass" "show" "bws/access-token"
+      }
     }
   }
 
