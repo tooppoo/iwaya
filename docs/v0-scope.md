@@ -32,7 +32,7 @@ Each of the following is absent for now rather than ruled out. Each requires its
 - noninteractive execution, or configurable TTY and stdin behavior
 - a secret delivery mechanism other than the container environment
 
-Capabilities the model excludes outright, rather than for now, are not listed here. Allow and deny rules, argument patterns, repository-context authorization, per-context command restrictions, and arbitrary runtime option pass-through are excluded by [the execution model](design/docker-execution.md) itself, with the reasons stated there.
+Capabilities the model excludes outright, rather than for now, are not listed here. Allow and deny rules, argument patterns, and repository-context authorization are excluded by [command policies](design/configuration.md#command-policies) themselves; per-context command restrictions and arbitrary runtime option pass-through are excluded by [the execution model](design/docker-execution.md); the reasons are stated in each.
 
 ## Open Decisions
 
