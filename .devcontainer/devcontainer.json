@@ -16,7 +16,12 @@
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/tooppoo/catalog-devcontainer-features/git-kura:0": {},
     "ghcr.io/tooppoo/catalog-devcontainer-features/rellog:0": {},
-    "ghcr.io/tooppoo/catalog-devcontainer-features/enozunu:0": {}
+    "ghcr.io/tooppoo/catalog-devcontainer-features/enozunu:0": {},
+    "ghcr.io/devcontainers/features/node:2": {
+        "version": "24.19.0",
+        "pnpmVersion": "11.20.0"
+    },
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   },
   "customizations": {
     "vscode": {

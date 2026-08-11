@@ -7,9 +7,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/documentation-writing",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "claude",
       "target_path": ".claude/skills/documentation-writing"
@@ -20,9 +23,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/subagent-review-loop",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "claude",
       "target_path": ".claude/skills/subagent-review-loop"
@@ -33,9 +39,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/code-comment",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "claude",
       "target_path": ".claude/skills/code-comment"
@@ -46,12 +55,63 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/cli-output-design",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "claude",
       "target_path": ".claude/skills/cli-output-design"
+    },
+    {
+      "source_name": "reportage",
+      "kind": "skill",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/reportage",
+        "selector": {
+          "type": "tag",
+          "value": "0.0.7"
+        },
+        "path": "ai/skills/reportage",
+        "resolved_revision": "cac6b603d75e6aaaab6d04992643b0e7818f8d78"
+      },
+      "target_ai": "claude",
+      "target_path": ".claude/skills/reportage"
+    },
+    {
+      "source_name": "review-sized-implementation",
+      "kind": "skill",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/catalog-agent-tools",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
+        "path": "common/skills/review-sized-implementation",
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
+      },
+      "target_ai": "claude",
+      "target_path": ".claude/skills/review-sized-implementation"
+    },
+    {
+      "source_name": "claude",
+      "kind": "instruction",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/catalog-agent-tools",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
+        "path": "instructions/base.md",
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
+      },
+      "target_ai": "claude",
+      "target_path": "CLAUDE.md"
     },
     {
       "source_name": "documentation-writing",
@@ -59,9 +119,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/documentation-writing",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "codex",
       "target_path": ".agents/skills/documentation-writing"
@@ -72,9 +135,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/subagent-review-loop",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "codex",
       "target_path": ".agents/skills/subagent-review-loop"
@@ -85,9 +151,12 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/code-comment",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "codex",
       "target_path": ".agents/skills/code-comment"
@@ -98,12 +167,63 @@
       "source": {
         "type": "git",
         "url": "https://github.com/tooppoo/catalog-agent-tools",
-        "branch": "main",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
         "path": "common/skills/cli-output-design",
-        "resolved_revision": "54a54e213078eea6e670dfdba319874cbdbac81b"
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
       },
       "target_ai": "codex",
       "target_path": ".agents/skills/cli-output-design"
+    },
+    {
+      "source_name": "reportage",
+      "kind": "skill",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/reportage",
+        "selector": {
+          "type": "tag",
+          "value": "0.0.7"
+        },
+        "path": "ai/skills/reportage",
+        "resolved_revision": "cac6b603d75e6aaaab6d04992643b0e7818f8d78"
+      },
+      "target_ai": "codex",
+      "target_path": ".agents/skills/reportage"
+    },
+    {
+      "source_name": "review-sized-implementation",
+      "kind": "skill",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/catalog-agent-tools",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
+        "path": "common/skills/review-sized-implementation",
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
+      },
+      "target_ai": "codex",
+      "target_path": ".agents/skills/review-sized-implementation"
+    },
+    {
+      "source_name": "codex",
+      "kind": "instruction",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/tooppoo/catalog-agent-tools",
+        "selector": {
+          "type": "branch",
+          "value": "main"
+        },
+        "path": "instructions/base.md",
+        "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
+      },
+      "target_ai": "codex",
+      "target_path": "AGENTS.md"
     }
   ]
 }

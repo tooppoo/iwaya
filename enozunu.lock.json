@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "url": "https://github.com/tooppoo/catalog-agent-tools",
+      "selector": {
+        "type": "branch",
+        "value": "main"
+      },
+      "resolved_revision": "ab8092ba9960758c19589c603f779b20fcde427d"
+    },
+    {
+      "url": "https://github.com/tooppoo/reportage",
+      "selector": {
+        "type": "tag",
+        "value": "0.0.7"
+      },
+      "resolved_revision": "cac6b603d75e6aaaab6d04992643b0e7818f8d78"
+    }
+  ]
+}

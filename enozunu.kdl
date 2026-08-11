@@ -75,15 +75,15 @@ enozunu config-version=1 {
       }
     }
 
-    // agents {
-    //   agent "example-agent" {
-    //     git {
-    //       url "https://github.com/your-org/your-agents-repo"
-    //       branch "main"
-    //       path "path/to/agents/example-agent.md"
-    //     }
-    //   }
-    // }
+    agents {
+      agent "example-agent" {
+        git {
+          url "https://github.com/your-org/your-agents-repo"
+          branch "main"
+          path "path/to/agents/example-agent.md"
+        }
+      }
+    }
   }
 
   // `consumer` selects what to materialize for each target AI.
