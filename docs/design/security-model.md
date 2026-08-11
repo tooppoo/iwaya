@@ -39,7 +39,7 @@ iwaya provides no protection against the following.
 
 ## Secret Lifecycle
 
-This lifecycle describes how long iwaya holds a resolved value and where it deliberately places it. Only the steps up to the container command are iwaya's to constrain; the inheritance past it is shown because a reader needs to know where the value ends up:
+This lifecycle describes how long iwaya holds a resolved user secret and where it deliberately places it. It is distinct from a provider credential, such as a BWS access token, which has a separate, shorter lifecycle described in [Provider Credentials](#provider-credentials) below. Only the steps up to the container command are iwaya's to constrain; the inheritance past it is shown because a reader needs to know where the value ends up:
 
 ```mermaid
 flowchart TD
@@ -72,6 +72,26 @@ The invoking shell is one of the environments a raw value must never reach. iway
 
 iwaya must not expose an API, subcommand, or output mode that prints, exports, or otherwise returns a raw secret value. Such a surface would turn iwaya from a delivery boundary into a general-purpose credential reader.
 
+### Provider Credentials
+
+A provider credential is a credential a provider needs to authenticate itself to its own backend, such as the BWS access token described in [the BWS Access Token declaration](configuration.md#bws-access-token). It is distinct from a user secret: a user secret is a value a provider resolves and iwaya forwards toward the target container, while a provider credential is never forwarded past the provider that requires it.
+
+```mermaid
+flowchart TD
+    acquisition["configured acquisition command"]
+    held["provider credential held by iwaya"]
+    subprocess["provider subprocess environment"]
+    provider["provider CLI or client"]
+
+    acquisition -->|"acquire only as required to start the provider subprocess"| held
+    held -->|"set only in the environment of the provider subprocess that requires it"| subprocess
+    subprocess --> provider
+```
+
+A provider credential exists only in the environment of the provider subprocess that requires it. It must never reach the environment of the container runtime process, the target container, or any other process, and it does not appear anywhere on the resolved-user-secret path shown in [Secret Lifecycle](#secret-lifecycle).
+
+The same destinations [listed above](#secret-lifecycle) that a raw secret value must never be written to apply equally to a provider credential, with one difference: a provider credential's only permitted process environment is the provider subprocess that requires it, not the container runtime process. An access-token acquisition command's stdout carries the credential before iwaya holds it, and is subject to the same restrictions as the credential itself.
+
 ## Division of Responsibility
 
 Configuration fixes what may be delivered and where. A command policy names the secrets a command receives, and a context names the container it runs in. Together they establish a configured delivery scope, which is not a decision about whether the invoking user is entitled to the credential.
@@ -82,5 +102,6 @@ The container boundary belongs to the container runtime. iwaya runs commands ins
 
 ## Related Documents
 
-- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the configuration, the execution order, and the invariants that implement this boundary.
+- [Configuration Model](configuration.md) defines the providers, contexts, and command policies, including the provider-credential declarations this document constrains.
+- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the execution order and the invariants that implement this boundary.
 - [Architecture Decision Records](../adr/README.md) record why these boundaries were chosen.

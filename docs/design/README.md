@@ -10,7 +10,9 @@ Read in this order when approaching the design for the first time. Each document
 
 1. **[Security Model and Limitations](security-model.md)** — the boundary iwaya claims, the exposure it reduces, and the protection it explicitly does not provide. Read this first, because the rest of the design only makes sense against a correct understanding of what iwaya is not.
 
-2. **[Docker Execution Context and Command Policy Model](docker-execution.md)** — the configuration layers, how an invocation selects a container and a command, the order in which iwaya validates, resolves secrets, and executes, and the invariants an implementation must preserve.
+2. **[Configuration Model](configuration.md)** — the three configuration layers: secret providers, the credentials some of them require, Docker execution contexts, and command policies.
+
+3. **[Docker Execution Context and Command Policy Model](docker-execution.md)** — how an invocation selects a container and a command, the order in which iwaya validates, resolves secrets, and executes, and the invariants an implementation must preserve.
 
 ## Responsibility Boundaries
 
@@ -19,6 +21,7 @@ Each document owns a distinct question, and none restates another:
 | Question | Document |
 |---|---|
 | What does iwaya guarantee, and what does it not? | [Security Model and Limitations](security-model.md) |
+| What are the configuration layers, and what does each provider, context, and command policy declare? | [Configuration Model](configuration.md) |
 | What may run where, which secrets does it receive, and in what order does that happen? | [Docker Execution Context and Command Policy Model](docker-execution.md) |
 | Why was it decided this way? | [Architecture Decision Records](../adr/README.md) |
 

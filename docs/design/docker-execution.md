@@ -8,144 +8,11 @@ The security boundary this model operates within is defined in [Security Model a
 
 ## Scope
 
-This document owns the configuration model, the order of validation, secret resolution, and execution, the construction of the runtime invocation, and the invariants an implementation must preserve.
+This document owns the order of validation, secret resolution, and execution, the construction of the runtime invocation, and the invariants an implementation must preserve.
 
 It does not define the CLI output contract. Output formats, exit-code categories, stable error codes, and diagnostic rendering are not decided here; see [Error Behavior](#error-behavior) for what this model does require of a failure.
 
-The configuration syntax shown here is a baseline example rather than a syntax reference. Once a parser exists, the field-level contract belongs in a generated configuration reference derived from it.
-
-## The Three Configuration Layers
-
-Configuration is divided into three layers, each answering one question.
-
-| Layer | Question | Defines |
-|---|---|---|
-| Secret provider | How is a secret obtained? | The provider type and its provider-specific settings |
-| Docker execution context | Where does a command run? | The Docker-compatible runtime and the container to execute in |
-| Command policy | Which secrets does a command receive? | The environment variable names and the secrets that supply them |
-
-The layers are independent by construction. A provider must not select contexts or commands, a context must not declare secrets, and a command policy must not declare container settings. This is what allows one container and one command to be defined once each, rather than once per combination of the two.
-
-### Secret Providers
-
-A provider defines how a secret is obtained. It does not decide which command receives it.
-
-```kdl
-providers {
-  bws "bws-default" {
-    project "philomagi.dev"
-  }
-}
-```
-
-The node name is the provider type. The first argument is the provider identifier, which must be unique across all provider instances, including instances of different types. Settings a provider type requires belong inside that provider's block.
-
-Each provider type declares what it requires. A general parameter model covering providers that do not exist yet must not be designed in advance.
-
-### Docker Execution Contexts
-
-A context defines the container a command runs in.
-
-```kdl
-contexts {
-  docker "iwaya" {
-    runtime "podman"
-    user "vscode"
-    workdir "/workspaces/iwaya"
-    container-name "iwaya-dev"
-  }
-}
-```
-
-The node name `docker` denotes the Docker-compatible `exec` model. A context type is a node name in this block, so adding one is a configuration-model change rather than a new field.
-
-| Field | Required | Meaning |
-|---|---|---|
-| first argument | yes | The context identifier, which must be unique |
-| `runtime` | no | The Docker-compatible command to invoke. Defaults to `docker` |
-| `user` | yes | The user the command runs as inside the container |
-| `workdir` | yes | The working directory inside the container |
-| `container-name` | yes | The name of the target container |
-
-`user` and `workdir` are required because the constructed argv always carries `--user` and `--workdir`. No invocation shape omits either one, so a context missing them is a configuration error rather than a request to let the container decide.
-
-`runtime` must be treated as a single executable. It must not be evaluated as a shell command string, so a value containing arguments, redirection, or command separators is a configuration error rather than a way to extend the invocation.
-
-### Command Policies
-
-A command policy defines which secrets a command receives, and under which environment variable names.
-
-```kdl
-policies {
-  command "claude" {
-    secret \
-      "ANTHROPIC_AUTH_TOKEN" \
-      provider="bws-default" \
-      secret-name="ANTHROPIC_AUTH_TOKEN"
-  }
-}
-```
-
-| Element | Meaning |
-|---|---|
-| `command` first argument | The command identifier, which must be unique |
-| `secret` first argument | The environment variable name the value is injected as |
-| `provider` | The identifier of the provider that supplies the value |
-| `secret-name` | The name of the secret within that provider |
-
-The command identifier serves two roles at once: it is the name the user types at the invocation, and it is the command name executed inside the container.
-
-The declared environment variable names, together with the provider and secret name supplying each, are the complete injection mapping. An invocation cannot name a provider, a secret name, or an environment mapping, so the delivery scope is fixed in configuration and reviewable there.
-
-A command policy is not an allow or deny rule. Matching machinery of that kind — argument patterns, rule priority, fallback, repository matching — has no place in the model, because none of it would constrain what the target command can do with the credential it received.
-
-### Baseline Example
-
-```kdl
-/- kdl-version 2
-
-iwaya version=1 {
-  providers {
-    bws "bws-default" {
-      project "philomagi.dev"
-    }
-  }
-
-  contexts {
-    docker "iwaya" {
-      runtime "podman"
-      user "vscode"
-      workdir "/workspaces/iwaya"
-      container-name "iwaya-dev"
-    }
-
-    docker "git-kura" {
-      runtime "podman"
-      user "vscode"
-      workdir "/workspaces/git-kura"
-      container-name "git-kura-dev"
-    }
-  }
-
-  policies {
-    command "claude" {
-      secret \
-        "ANTHROPIC_AUTH_TOKEN" \
-        provider="bws-default" \
-        secret-name="ANTHROPIC_AUTH_TOKEN"
-    }
-
-    command "gh" {
-      secret \
-        "GH_TOKEN" \
-        provider="bws-default" \
-        secret-name="GH_TOKEN"
-    }
-  }
-}
-```
-
-The three layers sit under an `iwaya` root node carrying a configuration `version`, so the version is available before anything below it is interpreted.
+The configuration model itself — secret providers, the credentials some of them require, Docker execution contexts, and command policies — is defined in [Configuration Model](configuration.md), including the baseline example this document validates, resolves, and executes.
 
 ## Selecting a Context and a Command
 
@@ -199,6 +66,7 @@ Validation must cover at least:
 - the required fields of every Docker context
 - the uniqueness of environment variable names within each command policy
 - the existence of every provider a command policy references
+- the required fields of every provider credential declaration, including the acquisition node it names, such as the `bws` provider's [`access-token` block](configuration.md#bws-access-token)
 
 Apart from the existence of the selected entries, validation covers the whole configuration rather than only the entries this invocation uses. A defect in an unselected context or policy is reported when it is introduced, not on the first invocation that happens to reach it.
 
@@ -210,9 +78,11 @@ After validation succeeds, iwaya resolves every secret the selected command poli
 
 If any one of them fails to resolve, the runtime command does not run. A partially populated environment is never handed to the container, because a command that starts with a missing credential either fails later in a less diagnosable way or proceeds against a credential it should not have used.
 
+A provider that requires a credential of its own, such as the `bws` provider's access token, acquires that credential before it resolves any secret. Acquisition failure is a secret-resolution failure: nothing executes, and no secret is resolved from that provider. See [BWS Access Token](configuration.md#bws-access-token) for the acquisition contract.
+
 ## Invocation Construction
 
-For this invocation, against the baseline example above:
+For this invocation, against [the baseline example](configuration.md#baseline-example):
 
 ```sh
 iwaya exec --context iwaya claude -- --resume
@@ -258,6 +128,8 @@ An `--env` option must be generated only for an environment variable that the se
 
 The resolved values are set in the environment of the runtime process that iwaya starts on the host. The container receives them because each name is forwarded with `--env NAME`.
 
+This section constrains the environment of that runtime process. A provider credential, such as the BWS access token, follows a separate path into the environment of a different subprocess; see [BWS Secret Resolution](configuration.md#bws-secret-resolution) and [Provider Credentials](security-model.md#provider-credentials).
+
 - The `--env NAME=VALUE` form must never be used. A raw secret value must not appear anywhere in the runtime argv, where it would be visible to any process that can read the host process table, and where argv-recording tools would capture it.
 - A policy-managed environment variable must always take the resolved value, overwriting a same-named variable in the invoking environment. It must never inherit the parent's value.
 - When resolution fails there is no fallback to the same-named variable in the invoking environment, and the command does not run.
@@ -274,7 +146,7 @@ Failures occur at three stages, and each stage constrains what must not happen a
 - **Secret resolution.** Nothing is executed, no already-resolved value is delivered anywhere, and no policy-managed variable falls back to the invoking environment.
 - **Execution.** The runtime may fail to start, or exit before the target command runs, for reasons this model does not control: a `runtime` binary that is missing, a container that is not running, a `user` or `workdir` the container rejects. iwaya reports the failure. It must not retry with a different credential set, re-resolve, or fall back to the invoking environment.
 
-A diagnostic must identify what failed precisely enough to act on. Naming the provider identifier, the secret name, the environment variable name, the context, the command, or the configuration location is required where it is available, and a diagnostic must never carry a raw secret value. Where raw values must not be written more generally is defined by [the security model](security-model.md#secret-lifecycle).
+A diagnostic must identify what failed precisely enough to act on. Naming the provider identifier, the secret name, the environment variable name, the context, the command, or the configuration location is required where it is available, and a diagnostic must never carry a raw secret value or a provider credential, including the access-token acquisition command's stdout. Where raw values must not be written more generally is defined by [the security model](security-model.md#secret-lifecycle), and where a provider credential may exist is further constrained by [Provider Credentials](security-model.md#provider-credentials).
 
 Failure causes must be distinguishable from one another. A configuration that does not parse, an unknown context, an unknown command, a provider that rejected a request, and a container that is not running call for different corrective actions, and a diagnostic that does not separate them leaves the user guessing.
 
@@ -297,8 +169,10 @@ Apart from secret injection and the forced `--interactive` and `--tty` behavior,
 9. An `--env` option exists only for an environment variable declared by the selected command policy.
 10. A policy-managed environment variable is never satisfied by the invoking environment, whether by inheritance or by fallback.
 11. iwaya is not represented as a sandbox.
+12. A provider credential never enters any subprocess argv, and exists only in the environment of the provider subprocess that requires it. It is never propagated to the container runtime process or the target container command.
 
 ## Related Documents
 
+- [Configuration Model](configuration.md) defines the providers, contexts, and command policies this document validates, resolves, and executes.
 - [Security Model and Limitations](security-model.md) defines what this model does and does not protect against.
 - [Architecture Decision Records](../adr/README.md) record why these choices were made.
