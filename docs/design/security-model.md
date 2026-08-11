@@ -74,7 +74,7 @@ iwaya must not expose an API, subcommand, or output mode that prints, exports, o
 
 ### Provider Credentials
 
-A provider credential is a credential a provider needs to authenticate itself to its own backend, such as the BWS access token described in [the BWS Access Token declaration](docker-execution.md#bws-access-token). It is distinct from a user secret: a user secret is a value a provider resolves and iwaya forwards toward the target container, while a provider credential is never forwarded past the provider that requires it.
+A provider credential is a credential a provider needs to authenticate itself to its own backend, such as the BWS access token described in [the BWS Access Token declaration](configuration.md#bws-access-token). It is distinct from a user secret: a user secret is a value a provider resolves and iwaya forwards toward the target container, while a provider credential is never forwarded past the provider that requires it.
 
 ```mermaid
 flowchart TD
@@ -102,5 +102,6 @@ The container boundary belongs to the container runtime. iwaya runs commands ins
 
 ## Related Documents
 
-- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the configuration, the execution order, and the invariants that implement this boundary.
+- [Configuration Model](configuration.md) defines the providers, contexts, and command policies, including the provider-credential declarations this document constrains.
+- [Docker Execution Context and Command Policy Model](docker-execution.md) describes the execution order and the invariants that implement this boundary.
 - [Architecture Decision Records](../adr/README.md) record why these boundaries were chosen.

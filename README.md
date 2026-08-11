@@ -44,7 +44,7 @@ Both the container and the command are named explicitly:
 * Arguments after `--` are appended unchanged to the target command.
 * An unknown context or an unknown command is an error, and nothing runs. iwaya executes only what is configured.
 
-Configuration is split so that a container and a command are each defined once, rather than once per combination. See the [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md) for the configuration layers, the execution order, and the secret-delivery constraints.
+Configuration is split so that a container and a command are each defined once, rather than once per combination. See the [Configuration Model](docs/design/configuration.md) for the configuration layers, and the [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md) for the execution order and the secret-delivery constraints.
 
 ## Index for Documents
 
@@ -53,5 +53,6 @@ Start from [the documentation index](docs/README.md), which explains what to rea
 ### Design and security
 
 * [Security Model and Limitations](docs/design/security-model.md)
+* [Configuration Model](docs/design/configuration.md)
 * [Docker Execution Context and Command Policy Model](docs/design/docker-execution.md)
 * [Architecture Decision Records](docs/adr/README.md)
