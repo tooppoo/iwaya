@@ -4,9 +4,11 @@
 //! (docs/design/docker-execution.md, "Execution Order").
 //!
 //! The output format and the exit-code categories are open decisions in
-//! docs/v0-scope.md. Until they are settled, diagnostics are single lines on
-//! stderr and the exit codes below are provisional; they distinguish the
-//! failure stages the model requires to stay distinguishable.
+//! docs/v0-scope.md. Until they are settled, iwaya's own failure diagnostics
+//! are single lines on stderr, usage errors and help are rendered by clap
+//! (which exits with 2, the provisional usage category), and the exit codes
+//! below are provisional; they distinguish the failure stages the model
+//! requires to stay distinguishable.
 
 mod bws;
 mod config;
@@ -17,21 +19,35 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::Parser;
+
 use config::{CommandId, ContextId, Provider, SecretName};
 
-const USAGE: &str = "usage: iwaya exec --context <context> <command> [-- args...]";
-
-const EXIT_USAGE: u8 = 2;
 const EXIT_CONFIG: u8 = 3;
 const EXIT_UNKNOWN_SELECTION: u8 = 4;
 const EXIT_RESOLUTION: u8 = 5;
 const EXIT_EXECUTION: u8 = 6;
 
+#[derive(Parser)]
+#[command(name = "iwaya", version)]
+enum Cli {
+    /// Run a configured command inside a configured Docker execution context
+    Exec {
+        /// The Docker execution context to run in; never inferred
+        #[arg(long)]
+        context: String,
+        /// The command policy to execute
+        command: String,
+        /// Appended unchanged to the target command
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+}
+
 // Debug is safe here: no variant carries a `Secret`, and `Secret` itself has
 // no `Debug` for a wrapper to derive one through.
 #[derive(Debug)]
 enum Failure {
-    Usage(String),
     Config(config::ConfigError),
     UnknownContext(ContextId),
     UnknownCommand(CommandId),
@@ -42,7 +58,6 @@ enum Failure {
 impl Failure {
     fn exit_code(&self) -> u8 {
         match self {
-            Failure::Usage(_) => EXIT_USAGE,
             Failure::Config(_) => EXIT_CONFIG,
             Failure::UnknownContext(_) | Failure::UnknownCommand(_) => EXIT_UNKNOWN_SELECTION,
             Failure::Resolution(_) => EXIT_RESOLUTION,
@@ -52,7 +67,6 @@ impl Failure {
 
     fn message(&self) -> String {
         match self {
-            Failure::Usage(detail) => format!("{detail}\n{USAGE}"),
             Failure::Config(e) => e.to_string(),
             Failure::UnknownContext(id) => {
                 format!("unknown context '{id}': no configured context has this identifier")
@@ -67,9 +81,16 @@ impl Failure {
 }
 
 fn main() -> ExitCode {
+    let Cli::Exec { context, command, args } = Cli::parse();
+    let invocation = Invocation {
+        context: ContextId::new(&context),
+        command: CommandId::new(&command),
+        args,
+    };
+
     // `exec_and_never_return` replaces this process on success, so reaching
     // a return value at all means a failure to report.
-    let failure = exec_and_never_return(std::env::args().skip(1).collect());
+    let failure = exec_and_never_return(invocation);
     eprintln!("iwaya: error: {}", failure.message());
     ExitCode::from(failure.exit_code())
 }
@@ -78,45 +99,6 @@ struct Invocation {
     context: ContextId,
     command: CommandId,
     args: Vec<String>,
-}
-
-fn parse_invocation(args: Vec<String>) -> Result<Invocation, Failure> {
-    let usage = |detail: &str| Failure::Usage(detail.to_string());
-
-    let mut args = args.into_iter();
-    match args.next().as_deref() {
-        Some("exec") => {}
-        Some(other) => return Err(usage(&format!("unknown subcommand '{other}'"))),
-        None => return Err(usage("a subcommand is required")),
-    }
-
-    let mut context = None;
-    let mut command = None;
-    let mut rest = Vec::new();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--context" => match args.next() {
-                Some(value) if context.is_none() => context = Some(value),
-                Some(_) => return Err(usage("'--context' is given more than once")),
-                None => return Err(usage("'--context' requires a value")),
-            },
-            "--" => {
-                rest = args.collect();
-                break;
-            }
-            other if other.starts_with('-') => {
-                return Err(usage(&format!("unknown option '{other}'")))
-            }
-            _ if command.is_none() => command = Some(arg),
-            _ => return Err(usage("more than one command operand; put command arguments after '--'")),
-        }
-    }
-
-    Ok(Invocation {
-        context: ContextId::new(&context.ok_or_else(|| usage("'--context' is required"))?),
-        command: CommandId::new(&command.ok_or_else(|| usage("a command operand is required"))?),
-        args: rest,
-    })
 }
 
 /// `IWAYA_CONFIG` overrides the location; the default follows the XDG base
@@ -132,12 +114,7 @@ fn config_path() -> PathBuf {
     config_home.join("iwaya").join("config.kdl")
 }
 
-fn exec_and_never_return(args: Vec<String>) -> Failure {
-    let invocation = match parse_invocation(args) {
-        Ok(invocation) => invocation,
-        Err(failure) => return failure,
-    };
-
+fn exec_and_never_return(invocation: Invocation) -> Failure {
     let configuration = match config::load(&config_path()) {
         Ok(configuration) => configuration,
         Err(e) => return Failure::Config(e),
@@ -196,55 +173,52 @@ fn exec_and_never_return(args: Vec<String>) -> Failure {
 mod tests {
     use super::*;
 
-    fn parse(args: &[&str]) -> Result<Invocation, Failure> {
-        parse_invocation(args.iter().map(|a| a.to_string()).collect())
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once(&"iwaya").chain(args))
     }
 
-    fn usage_detail(args: &[&str]) -> String {
-        match parse(args) {
-            Err(Failure::Usage(detail)) => detail,
-            Err(_) => panic!("expected a usage failure"),
-            Ok(_) => panic!("expected an error"),
-        }
+    fn parsed_exec(args: &[&str]) -> (String, String, Vec<String>) {
+        let Cli::Exec { context, command, args } = parse(args).unwrap();
+        (context, command, args)
     }
 
     #[test]
     fn parses_the_documented_invocations() {
-        let invocation = parse(&["exec", "--context", "iwaya", "claude"]).unwrap();
-        assert_eq!(invocation.context, ContextId::new("iwaya"));
-        assert_eq!(invocation.command, CommandId::new("claude"));
-        assert_eq!(invocation.args, Vec::<String>::new());
+        let (context, command, args) = parsed_exec(&["exec", "--context", "iwaya", "claude"]);
+        assert_eq!(context, "iwaya");
+        assert_eq!(command, "claude");
+        assert_eq!(args, Vec::<String>::new());
 
-        let invocation =
-            parse(&["exec", "--context", "git-kura", "claude", "--", "--resume"]).unwrap();
-        assert_eq!(invocation.context, ContextId::new("git-kura"));
-        assert_eq!(invocation.command, CommandId::new("claude"));
-        assert_eq!(invocation.args, ["--resume"]);
+        let (context, command, args) =
+            parsed_exec(&["exec", "--context", "git-kura", "claude", "--", "--resume"]);
+        assert_eq!(context, "git-kura");
+        assert_eq!(command, "claude");
+        assert_eq!(args, ["--resume"]);
     }
 
     #[test]
     fn everything_after_the_separator_is_appended_unchanged() {
-        let invocation = parse(&[
+        let (_, _, args) = parsed_exec(&[
             "exec", "--context", "c", "cmd", "--", "--context", "other", "--", "-x",
-        ])
-        .unwrap();
-        assert_eq!(invocation.args, ["--context", "other", "--", "-x"]);
+        ]);
+        assert_eq!(args, ["--context", "other", "--", "-x"]);
     }
 
     #[test]
     fn rejects_malformed_invocations() {
-        assert!(usage_detail(&[]).contains("subcommand"));
-        assert!(usage_detail(&["run"]).contains("unknown subcommand"));
-        assert!(usage_detail(&["exec", "cmd"]).contains("'--context' is required"));
-        assert!(usage_detail(&["exec", "--context"]).contains("requires a value"));
+        assert!(parse(&[]).is_err(), "a subcommand is required");
+        assert!(parse(&["run"]).is_err(), "unknown subcommand");
+        assert!(parse(&["exec", "cmd"]).is_err(), "'--context' is required");
+        assert!(parse(&["exec", "--context"]).is_err(), "'--context' requires a value");
         assert!(
-            usage_detail(&["exec", "--context", "a", "--context", "b", "cmd"])
-                .contains("more than once")
+            parse(&["exec", "--context", "a", "--context", "b", "cmd"]).is_err(),
+            "'--context' more than once"
         );
-        assert!(usage_detail(&["exec", "--context", "c"]).contains("command operand is required"));
-        assert!(usage_detail(&["exec", "--context", "c", "-v", "cmd"]).contains("unknown option"));
+        assert!(parse(&["exec", "--context", "c"]).is_err(), "a command operand is required");
+        assert!(parse(&["exec", "--context", "c", "-v", "cmd"]).is_err(), "unknown option");
         assert!(
-            usage_detail(&["exec", "--context", "c", "cmd", "extra"]).contains("after '--'")
+            parse(&["exec", "--context", "c", "cmd", "extra"]).is_err(),
+            "target-command arguments must follow '--'"
         );
     }
 }

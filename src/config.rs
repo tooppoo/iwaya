@@ -377,7 +377,7 @@ fn parse_context(node: &KdlNode) -> Result<DockerContext, ParseFailure> {
     if runtime.is_empty()
         || runtime
             .chars()
-            .any(|c| c.is_whitespace() || ";|&<>'\"`$\\".contains(c))
+            .any(|c| c.is_whitespace() || ";|&<>'\"`$\\\0".contains(c))
     {
         return invalid(format!(
             "{owner} has a 'runtime' that is not a single executable"
@@ -458,6 +458,21 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
                 context.id
             ));
         }
+        // These fields become argv elements, where a NUL byte cannot exist;
+        // it would surface as an exec failure instead of the configuration
+        // error it is.
+        for (field, value) in [
+            ("user", &context.user),
+            ("workdir", &context.workdir),
+            ("container-name", &context.container_name),
+        ] {
+            if value.contains('\0') {
+                return invalid(format!(
+                    "context '{}' has a '{field}' containing a NUL byte",
+                    context.id
+                ));
+            }
+        }
     }
 
     let mut command_ids = std::collections::HashSet::new();
@@ -467,8 +482,12 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
         }
         // The command identifier is executed inside the container and also
         // occupies a positional argv slot; a leading '-' would read as an
-        // option to the runtime rather than a command name.
-        if policy.id.as_str().is_empty() || policy.id.as_str().starts_with('-') {
+        // option to the runtime rather than a command name, and a NUL byte
+        // cannot exist in an argv element.
+        if policy.id.as_str().is_empty()
+            || policy.id.as_str().starts_with('-')
+            || policy.id.as_str().contains('\0')
+        {
             return invalid(format!(
                 "command '{}' has an identifier that is not a command name",
                 policy.id
@@ -708,6 +727,27 @@ iwaya version=1 {
             message.contains("not an environment variable name"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn rejects_argv_bound_values_containing_a_nul_byte() {
+        let config = Config {
+            providers: vec![],
+            contexts: vec![DockerContext {
+                id: ContextId::new("c"),
+                runtime: "docker".to_string(),
+                user: "u".to_string(),
+                workdir: "/w\0".to_string(),
+                container_name: "n".to_string(),
+            }],
+            policies: vec![],
+        };
+        match validate(&config) {
+            Err(ParseFailure::Model(message)) => {
+                assert!(message.contains("NUL"), "{message}")
+            }
+            _ => panic!("expected a model error"),
+        }
     }
 
     #[test]
