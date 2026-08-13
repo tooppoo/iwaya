@@ -4,11 +4,15 @@
 
 iwaya runs a configured command inside a selected development container, delivering only the secrets that command's policy declares.
 
+The stance behind it is a split. A development container is something you can afford to lose: the work tree comes back from version control, packages can be reinstalled, and the container can be rebuilt from its definition. A credential is not like that. It carries authority over an external service, and its misuse is felt outside the container and after the container is gone.
+
+So iwaya leaves the container alone and guards the crossing. It does not restrict what your command does once it is running, because the answer to a damaged container is to rebuild it. It does control which secrets are allowed to cross into that container, and for which execution. This assumes your container really is one you can afford to lose; iwaya does not check that.
+
 You choose the container and the command at the call site. iwaya resolves the declared secrets and forwards them into the container for that one execution. iwaya itself writes the raw value nowhere: not into container login state, not into your shell, not into its own configuration, logs, or caches. What the command does with the value once it has it is outside iwaya's control.
 
 It exists so that you do not have to leave a credential behind yourself: no `gh auth login` inside the container, no token exported into your shell, no `.env` file mounted in.
 
-iwaya is a mitigation layer, not a security sandbox. It does not guarantee containment of malicious commands or prevent every possible form of secret exfiltration.
+iwaya is a mitigation layer, not a security sandbox: it narrows who receives a secret, and does not close every channel by which one can leak.
 
 See [Security Model and Limitations](docs/design/security-model.md) for the boundary it claims and the protection it does not provide.
 

@@ -4,7 +4,7 @@ This directory holds the durable documentation for iwaya. The project overview a
 
 ## Where to Start
 
-**If you want to know whether iwaya protects your credentials**, read [Security Model and Limitations](design/security-model.md) first. It states the boundary and, more importantly, what iwaya does not protect against.
+**If you want to know whether iwaya protects your credentials**, read [Security Model and Limitations](design/security-model.md) first. It states the boundary, the premise about your environment that the boundary depends on, and, more importantly, what iwaya does not protect against.
 
 **If you want to know what iwaya will run and which secrets it delivers**, read [Configuration Model](design/configuration.md) for the three configuration layers, then [Docker Execution Context and Command Policy Model](design/docker-execution.md) for how an invocation selects a container and a command, and the order in which iwaya validates, resolves secrets, and executes.
 

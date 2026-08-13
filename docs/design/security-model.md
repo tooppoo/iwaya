@@ -1,10 +1,10 @@
 # Security Model and Limitations
 
-This document defines the security boundary iwaya claims, the exposure it is designed to reduce, and the protection it explicitly does not provide.
+This document defines the security boundary iwaya claims, the premise about the execution environment it assumes, the exposure it is designed to reduce, and the protection it explicitly does not provide.
 
 Read this before relying on iwaya to protect a credential, and before describing iwaya's guarantees in documentation, diagnostics, or issue discussion.
 
-The durable decisions behind this boundary are recorded in [Treat iwaya as a Mitigation Boundary, Not a Sandbox](../adr/20260710T170955Z_mitigation-boundary-not-sandbox.md) and [Define iwaya as a Docker-Context Secret Injection Runner](../adr/20260806T192918Z_docker-context-secret-injection-runner.md).
+The durable decisions behind this boundary are recorded in [Treat iwaya as a Mitigation Boundary, Not a Sandbox](../adr/20260710T170955Z_mitigation-boundary-not-sandbox.md), [Separate a Disposable Environment from a Non-Disposable Secret Boundary](../adr/20260813T131228Z_disposable-environment-and-secret-boundary.md), and [Define iwaya as a Docker-Context Secret Injection Runner](../adr/20260806T192918Z_docker-context-secret-injection-runner.md).
 
 ## Mitigation Boundary, Not a Sandbox
 
@@ -13,6 +13,20 @@ iwaya is a mitigation layer. It is not a sandbox, and it does not contain hostil
 The distinction matters because the two provide different guarantees. A sandbox constrains what a running process is able to do. iwaya instead constrains which executions receive a secret at all. Once a process holds a secret, iwaya has no further control over it, including how long it keeps it.
 
 iwaya must never be described as a sandbox, an isolation layer, or a containment mechanism.
+
+## The Premise: a Disposable Environment
+
+iwaya assumes the environment it delivers into is one the user can afford to lose. That assumption is what makes the boundary above a deliberate trade rather than a gap.
+
+A work tree is restorable from version control, packages can be reinstalled, and a container can be rebuilt from its definition. A credential cannot be reconstructed that way, and its misuse is felt outside the environment and after that environment is gone. iwaya therefore leaves the environment alone and controls only what crosses into it.
+
+Two things follow.
+
+**iwaya does not restrict what a command does.** Editing files, adding dependencies, and running further commands are ordinary work inside the environment, and iwaya neither enumerates nor approves them. iwaya must not gain filesystem policy, network allowlists, command interception, or process restriction, because it starts a runtime process and does not mediate what happens inside it. A rule of that kind belongs to the container runtime, the operating system, or an isolation layer around iwaya.
+
+**Satisfying the premise is the user's responsibility.** An environment is disposable when it shares no more of the host than the work requires, holds no permanently installed host credential, has a work tree restorable from version control, and can be recreated from its definition. iwaya must not test any of that, and must not refuse to run when it does not hold. Where the environment is not disposable, the user needs a layer iwaya does not provide.
+
+Only an execution that needs a credential goes through iwaya. Ordinary work in the same environment is unaffected by it, and holds no iwaya-delivered credential.
 
 ## What iwaya Reduces
 
