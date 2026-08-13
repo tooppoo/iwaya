@@ -12,6 +12,7 @@ Accepted:
 
 * [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) — iwaya's architectural identity, CLI contract, configuration model, and secret-delivery model.
 * [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) — why iwaya must not be described as a sandbox, and what that costs.
+* [Separate a Disposable Environment from a Non-Disposable Secret Boundary](20260813T131228Z_disposable-environment-and-secret-boundary.md) — the concept iwaya is organized around: broad authority inside an environment that can be rebuilt, tight control over the credentials allowed to cross into it.
 * [Implement iwaya in Rust](20260808T171732Z_implement-iwaya-in-rust.md) — the implementation language.
 
 Superseded, kept as history:
