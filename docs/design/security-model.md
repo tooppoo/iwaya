@@ -24,7 +24,7 @@ Two things follow.
 
 **iwaya does not restrict what a command does.** Editing files, adding dependencies, and running further commands are ordinary work inside the environment, and iwaya neither enumerates nor approves them. iwaya must not gain filesystem policy, network allowlists, command interception, or process restriction, because it starts a runtime process and does not mediate what happens inside it. A rule of that kind belongs to the container runtime, the operating system, or an isolation layer around iwaya.
 
-**Satisfying the premise is the user's responsibility.** An environment is disposable when it shares no more of the host than the work requires, holds no permanently installed host credential, has a work tree restorable from version control, and can be recreated from its definition. iwaya must not test any of that, and must not refuse to run when it does not hold. Where the environment is not disposable, the user needs a layer iwaya does not provide.
+**Satisfying the premise is the user's responsibility.** An environment is disposable when it shares no more of the host than the work requires, keeps no credential stored in it between executions, has a work tree restorable from version control, and can be recreated from its definition. iwaya must not test any of those properties, and must not refuse to run when the premise does not hold. Where the environment is not disposable, the user needs a layer iwaya does not provide.
 
 Only an execution that needs a credential goes through iwaya. Ordinary work in the same environment is unaffected by it, and holds no iwaya-delivered credential.
 
