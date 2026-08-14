@@ -51,6 +51,11 @@ enum Failure {
     Config(config::ConfigError),
     UnknownContext(ContextId),
     UnknownCommand(CommandId),
+    // Temporary while proxy-secret delivery is built incrementally (issue
+    // #31): the configuration contract is in place before the execution
+    // path. Shares the configuration exit code because the corrective
+    // action is configuration-side.
+    ProxySecretUnsupported(CommandId),
     Resolution(bws::ResolveError),
     Execution(run::ExecError),
 }
@@ -58,7 +63,7 @@ enum Failure {
 impl Failure {
     fn exit_code(&self) -> u8 {
         match self {
-            Failure::Config(_) => EXIT_CONFIG,
+            Failure::Config(_) | Failure::ProxySecretUnsupported(_) => EXIT_CONFIG,
             Failure::UnknownContext(_) | Failure::UnknownCommand(_) => EXIT_UNKNOWN_SELECTION,
             Failure::Resolution(_) => EXIT_RESOLUTION,
             Failure::Execution(_) => EXIT_EXECUTION,
@@ -73,6 +78,11 @@ impl Failure {
             }
             Failure::UnknownCommand(id) => {
                 format!("unknown command '{id}': no configured command policy has this identifier")
+            }
+            Failure::ProxySecretUnsupported(id) => {
+                format!(
+                    "command '{id}' declares 'proxy-secret', which this version of iwaya does not execute yet; nothing was executed"
+                )
             }
             Failure::Resolution(e) => format!("secret resolution failed, nothing was executed: {e}"),
             Failure::Execution(e) => e.to_string(),
@@ -126,6 +136,13 @@ fn exec_and_never_return(invocation: Invocation) -> Failure {
     let Some(policy) = configuration.policy(&invocation.command) else {
         return Failure::UnknownCommand(invocation.command);
     };
+
+    // Running the command anyway would break the guarantee that the declared
+    // injection mapping is complete: the process would start without the
+    // credential its policy promises.
+    if !policy.proxy_secrets.is_empty() {
+        return Failure::ProxySecretUnsupported(invocation.command);
+    }
 
     // Every declared secret resolves before anything executes, and only
     // declared secrets are resolved. One failure aborts the invocation: a

@@ -117,12 +117,37 @@ pub struct DockerContext {
 pub struct CommandPolicy {
     pub id: CommandId,
     pub secrets: Vec<SecretSpec>,
+    pub proxy_secrets: Vec<ProxySecretSpec>,
 }
 
 pub struct SecretSpec {
     pub env_name: EnvName,
     pub provider: ProviderId,
     pub secret_name: SecretName,
+}
+
+/// Proxy-mediated delivery: the target process receives a phantom credential
+/// under `env_name`, and the raw value is used only by an iwaya-run proxy
+/// toward `upstream` (docs/design/configuration.md, "Proxy-Backed Secret
+/// Delivery").
+pub struct ProxySecretSpec {
+    pub env_name: EnvName,
+    pub provider: ProviderId,
+    // Unread until the proxy execution path resolves proxy-backed secrets
+    // (issue #31).
+    #[allow(dead_code)]
+    pub secret_name: SecretName,
+    pub upstream: String,
+    pub base_url_env: EnvName,
+    pub inject_header: InjectHeader,
+}
+
+/// The header the proxy rewrites: the phantom credential arrives under
+/// `name`, and the raw value is sent as `template` with its one `{}`
+/// placeholder substituted.
+pub struct InjectHeader {
+    pub name: String,
+    pub template: String,
 }
 
 /// A configuration that does not parse and a configuration that parses but
@@ -409,29 +434,97 @@ fn parse_policy(node: &KdlNode) -> Result<CommandPolicy, ParseFailure> {
     let owner = format!("command '{id}'");
 
     let mut secrets = Vec::new();
+    let mut proxy_secrets = Vec::new();
     for child in children(node) {
-        if child.name().value() != "secret" {
-            return invalid(format!(
-                "unknown entry '{}' in {owner}",
-                child.name().value()
-            ));
+        match child.name().value() {
+            "secret" => {
+                let secret_arguments = positional_strings(child)?;
+                let [env_name] = secret_arguments.as_slice() else {
+                    return invalid(format!(
+                        "a 'secret' in {owner} requires exactly one environment variable name argument"
+                    ));
+                };
+                secrets.push(SecretSpec {
+                    env_name: EnvName::new(env_name),
+                    provider: ProviderId::new(property(child, "provider", &owner)?),
+                    secret_name: SecretName::new(property(child, "secret-name", &owner)?),
+                });
+            }
+            "proxy-secret" => proxy_secrets.push(parse_proxy_secret(child, &owner)?),
+            other => return invalid(format!("unknown entry '{other}' in {owner}")),
         }
-        let secret_arguments = positional_strings(child)?;
-        let [env_name] = secret_arguments.as_slice() else {
-            return invalid(format!(
-                "a 'secret' in {owner} requires exactly one environment variable name argument"
-            ));
-        };
-        secrets.push(SecretSpec {
-            env_name: EnvName::new(env_name),
-            provider: ProviderId::new(property(child, "provider", &owner)?),
-            secret_name: SecretName::new(property(child, "secret-name", &owner)?),
-        });
     }
 
     Ok(CommandPolicy {
         id: CommandId::new(id),
         secrets,
+        proxy_secrets,
+    })
+}
+
+fn parse_proxy_secret(node: &KdlNode, policy_owner: &str) -> Result<ProxySecretSpec, ParseFailure> {
+    let arguments = positional_strings(node)?;
+    let [env_name] = arguments.as_slice() else {
+        return invalid(format!(
+            "a 'proxy-secret' in {policy_owner} requires exactly one environment variable name argument"
+        ));
+    };
+    let owner = format!("proxy-secret '{env_name}' in {policy_owner}");
+
+    let mut provider = None;
+    let mut secret_name = None;
+    let mut upstream = None;
+    let mut base_url_env = None;
+    let mut inject_header = None;
+    for child in children(node) {
+        let setting = child.name().value();
+        // 'inject-header' is the one setting with two arguments, so it does
+        // not go through the shared single-argument path below.
+        if setting == "inject-header" {
+            if inject_header.is_some() {
+                return invalid(format!("{owner} declares 'inject-header' more than once"));
+            }
+            let header_arguments = positional_strings(child)?;
+            let [name, template] = header_arguments.as_slice() else {
+                return invalid(format!(
+                    "'inject-header' in {owner} requires a header name argument and a template argument"
+                ));
+            };
+            inject_header = Some(InjectHeader {
+                name: name.to_string(),
+                template: template.to_string(),
+            });
+            continue;
+        }
+        let target = match setting {
+            "provider" => &mut provider,
+            "secret-name" => &mut secret_name,
+            "upstream" => &mut upstream,
+            "base-url-env" => &mut base_url_env,
+            other => return invalid(format!("unknown setting '{other}' in {owner}")),
+        };
+        if target.is_some() {
+            return invalid(format!("{owner} declares '{setting}' more than once"));
+        }
+        *target = Some(single_string_argument(child, &owner)?.to_string());
+    }
+
+    let require = |value: Option<String>, field: &str| match value {
+        Some(v) => Ok(v),
+        None => invalid(format!("{owner} requires a '{field}' setting")),
+    };
+
+    let Some(inject_header) = inject_header else {
+        return invalid(format!("{owner} requires an 'inject-header' setting"));
+    };
+
+    Ok(ProxySecretSpec {
+        env_name: EnvName::new(env_name),
+        provider: ProviderId::new(&require(provider, "provider")?),
+        secret_name: SecretName::new(&require(secret_name, "secret-name")?),
+        upstream: require(upstream, "upstream")?,
+        base_url_env: EnvName::new(&require(base_url_env, "base-url-env")?),
+        inject_header,
     })
 }
 
@@ -494,11 +587,15 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
             ));
         }
 
+        // Every environment variable a policy injects lands in the same
+        // target environment, so `secret` names, `proxy-secret` names, and
+        // `base-url-env` names share one uniqueness scope; a collision is a
+        // configuration error, never an ordering rule.
         let mut env_names = std::collections::HashSet::new();
-        for secret in &policy.secrets {
+        let mut declare_env_name = |env_name: &EnvName| -> Result<(), ParseFailure> {
             // '=' would turn the generated `--env NAME` into the forbidden
             // `--env NAME=VALUE` shape; '-' would read as an option.
-            let name = secret.env_name.as_str();
+            let name = env_name.as_str();
             if name.is_empty()
                 || name.starts_with('-')
                 || name.contains('=')
@@ -506,15 +603,26 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
             {
                 return invalid(format!(
                     "command '{}' declares '{}', which is not an environment variable name",
-                    policy.id, secret.env_name
+                    policy.id, env_name
                 ));
             }
-            if !env_names.insert(&secret.env_name) {
+            if !env_names.insert(env_name.clone()) {
                 return invalid(format!(
                     "command '{}' declares environment variable '{}' more than once",
-                    policy.id, secret.env_name
+                    policy.id, env_name
                 ));
             }
+            Ok(())
+        };
+        for secret in &policy.secrets {
+            declare_env_name(&secret.env_name)?;
+        }
+        for proxy in &policy.proxy_secrets {
+            declare_env_name(&proxy.env_name)?;
+            declare_env_name(&proxy.base_url_env)?;
+        }
+
+        for secret in &policy.secrets {
             if config.provider(&secret.provider).is_none() {
                 return invalid(format!(
                     "command '{}' references unknown provider '{}' for '{}'",
@@ -522,6 +630,72 @@ fn validate(config: &Config) -> Result<(), ParseFailure> {
                 ));
             }
         }
+        for proxy in &policy.proxy_secrets {
+            validate_proxy_secret(config, policy, proxy)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_proxy_secret(
+    config: &Config,
+    policy: &CommandPolicy,
+    proxy: &ProxySecretSpec,
+) -> Result<(), ParseFailure> {
+    if config.provider(&proxy.provider).is_none() {
+        return invalid(format!(
+            "command '{}' references unknown provider '{}' for '{}'",
+            policy.id, proxy.provider, proxy.env_name
+        ));
+    }
+
+    // The upstream contributes only the scheme and the authority of proxied
+    // requests; path and query always come from the request itself. A value
+    // carrying its own path, query, userinfo, or fragment would be silently
+    // ignored, so it is a configuration error rather than a merge rule.
+    let host = proxy
+        .upstream
+        .strip_prefix("https://")
+        .or_else(|| proxy.upstream.strip_prefix("http://"));
+    let is_origin = host.is_some_and(|host| {
+        !host.is_empty()
+            && !host
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control() || "/?#@\\".contains(c))
+    });
+    if !is_origin {
+        return invalid(format!(
+            "command '{}' has an 'upstream' for '{}' that is not an http(s) origin",
+            policy.id, proxy.env_name
+        ));
+    }
+
+    let name = &proxy.inject_header.name;
+    let is_token_char =
+        |c: char| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c);
+    if name.is_empty() || !name.chars().all(is_token_char) {
+        return invalid(format!(
+            "command '{}' has an 'inject-header' for '{}' whose name is not an HTTP header name",
+            policy.id, proxy.env_name
+        ));
+    }
+
+    let template = &proxy.inject_header.template;
+    if template.matches("{}").count() != 1 {
+        return invalid(format!(
+            "command '{}' has an 'inject-header' template for '{}' that does not contain exactly one '{{}}' placeholder",
+            policy.id, proxy.env_name
+        ));
+    }
+    // The template becomes a header value carrying the raw secret, so
+    // anything outside printable ASCII — above all CR and LF — would open
+    // header injection at the configuration layer.
+    if !template.chars().all(|c| c.is_ascii() && !c.is_ascii_control()) {
+        return invalid(format!(
+            "command '{}' has an 'inject-header' template for '{}' containing a character that cannot appear in an HTTP header value",
+            policy.id, proxy.env_name
+        ));
     }
 
     Ok(())
@@ -795,5 +969,228 @@ iwaya version=1 {
     fn rejects_a_missing_version() {
         let message = invalid_message("iwaya { }");
         assert!(message.contains("version"), "{message}");
+    }
+
+    /// One policy body under a fixed provider, so proxy-secret tests state
+    /// only what they vary.
+    fn policy_config(policy_body: &str) -> String {
+        format!(
+            r#"iwaya version=1 {{
+                 providers {{ bws "b" {{ project "p"; access-token {{ exec "true" }} }} }}
+                 policies {{ command "c" {{ {policy_body} }} }}
+               }}"#
+        )
+    }
+
+    fn proxy_secret(upstream: &str, base_url_env: &str, inject_header: &str) -> String {
+        format!(
+            r#"proxy-secret "A" {{
+                 provider "b"
+                 secret-name "x"
+                 upstream "{upstream}"
+                 base-url-env "{base_url_env}"
+                 inject-header {inject_header}
+               }}"#
+        )
+    }
+
+    #[test]
+    fn parses_the_documented_proxy_secret() {
+        let config = parse(&policy_config(
+            r#"proxy-secret "ANTHROPIC_AUTH_TOKEN" {
+                 provider "b"
+                 secret-name "ANTHROPIC_AUTH_TOKEN"
+                 upstream "https://api.anthropic.com"
+                 base-url-env "ANTHROPIC_BASE_URL"
+                 inject-header "x-api-key" "{}"
+               }"#,
+        ))
+        .unwrap();
+
+        let policy = config.policy(&CommandId::new("c")).unwrap();
+        assert!(policy.secrets.is_empty());
+        let [proxy] = policy.proxy_secrets.as_slice() else {
+            panic!("expected exactly one proxy-secret");
+        };
+        assert_eq!(proxy.env_name, EnvName::new("ANTHROPIC_AUTH_TOKEN"));
+        assert_eq!(proxy.provider, ProviderId::new("b"));
+        assert_eq!(proxy.secret_name, SecretName::new("ANTHROPIC_AUTH_TOKEN"));
+        assert_eq!(proxy.upstream, "https://api.anthropic.com");
+        assert_eq!(proxy.base_url_env, EnvName::new("ANTHROPIC_BASE_URL"));
+        assert_eq!(proxy.inject_header.name, "x-api-key");
+        assert_eq!(proxy.inject_header.template, "{}");
+    }
+
+    #[test]
+    fn rejects_a_proxy_secret_without_an_environment_variable_name() {
+        let message = invalid_message(&policy_config(r#"proxy-secret { provider "b" }"#));
+        assert!(
+            message.contains("exactly one environment variable name argument"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_proxy_secret_missing_a_required_setting() {
+        let message = invalid_message(&policy_config(
+            r#"proxy-secret "A" {
+                 provider "b"
+                 secret-name "x"
+                 base-url-env "B"
+                 inject-header "x-api-key" "{}"
+               }"#,
+        ));
+        assert!(message.contains("upstream"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_proxy_secret_missing_an_inject_header() {
+        let message = invalid_message(&policy_config(
+            r#"proxy-secret "A" {
+                 provider "b"
+                 secret-name "x"
+                 upstream "https://u.example"
+                 base-url-env "B"
+               }"#,
+        ));
+        assert!(message.contains("inject-header"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_proxy_secret_declaring_a_setting_more_than_once() {
+        let message = invalid_message(&policy_config(
+            r#"proxy-secret "A" {
+                 provider "b"
+                 provider "b"
+                 secret-name "x"
+                 upstream "https://u.example"
+                 base-url-env "B"
+                 inject-header "x-api-key" "{}"
+               }"#,
+        ));
+        assert!(message.contains("more than once"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_unknown_setting_in_a_proxy_secret() {
+        let message = invalid_message(&policy_config(
+            r#"proxy-secret "A" {
+                 provider "b"
+                 secret-name "x"
+                 upstream "https://u.example"
+                 base-url-env "B"
+                 inject-header "x-api-key" "{}"
+                 follow-redirects "yes"
+               }"#,
+        ));
+        assert!(message.contains("unknown setting 'follow-redirects'"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_inject_header_without_a_template() {
+        let message = invalid_message(&policy_config(&proxy_secret(
+            "https://u.example",
+            "B",
+            r#""x-api-key""#,
+        )));
+        assert!(message.contains("template argument"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_inject_header_name_that_is_not_a_header_name() {
+        let message = invalid_message(&policy_config(&proxy_secret(
+            "https://u.example",
+            "B",
+            r#""x api key" "{}""#,
+        )));
+        assert!(message.contains("HTTP header name"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_inject_header_template_without_exactly_one_placeholder() {
+        for template in [r#""x-api-key" "token""#, r#""x-api-key" "{} {}""#] {
+            let message = invalid_message(&policy_config(&proxy_secret(
+                "https://u.example",
+                "B",
+                template,
+            )));
+            assert!(message.contains("exactly one '{}' placeholder"), "{message}");
+        }
+    }
+
+    #[test]
+    fn rejects_an_inject_header_template_containing_a_control_character() {
+        let message = invalid_message(&policy_config(&proxy_secret(
+            "https://u.example",
+            "B",
+            r#""x-api-key" "{}\n""#,
+        )));
+        assert!(message.contains("HTTP header value"), "{message}");
+    }
+
+    #[test]
+    fn rejects_an_upstream_that_is_not_an_origin() {
+        for upstream in [
+            "u.example",
+            "https://u.example/v1",
+            "https://",
+            "https://user@u.example",
+            "ftp://u.example",
+        ] {
+            let message = invalid_message(&policy_config(&proxy_secret(
+                upstream,
+                "B",
+                r#""x-api-key" "{}""#,
+            )));
+            assert!(message.contains("http(s) origin"), "{message}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_base_url_env_that_is_not_an_environment_variable_name() {
+        let message = invalid_message(&policy_config(&proxy_secret(
+            "https://u.example",
+            "B=1",
+            r#""x-api-key" "{}""#,
+        )));
+        assert!(
+            message.contains("not an environment variable name"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_base_url_env_that_collides_with_a_secret_env_name() {
+        let body = format!(
+            r#"secret "B" provider="b" secret-name="y"
+               {}"#,
+            proxy_secret("https://u.example", "B", r#""x-api-key" "{}""#)
+        );
+        let message = invalid_message(&policy_config(&body));
+        assert!(message.contains("more than once"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_base_url_env_that_collides_with_its_own_credential_name() {
+        let message = invalid_message(&policy_config(&proxy_secret(
+            "https://u.example",
+            "A",
+            r#""x-api-key" "{}""#,
+        )));
+        assert!(message.contains("more than once"), "{message}");
+    }
+
+    #[test]
+    fn rejects_a_proxy_secret_referencing_an_unknown_provider() {
+        let message = invalid_message(&policy_config(
+            r#"proxy-secret "A" {
+                 provider "nope"
+                 secret-name "x"
+                 upstream "https://u.example"
+                 base-url-env "B"
+                 inject-header "x-api-key" "{}"
+               }"#,
+        ));
+        assert!(message.contains("unknown provider 'nope'"), "{message}");
     }
 }
