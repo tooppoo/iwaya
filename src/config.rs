@@ -650,21 +650,7 @@ fn validate_proxy_secret(
         ));
     }
 
-    // The upstream contributes only the scheme and the authority of proxied
-    // requests; path and query always come from the request itself. A value
-    // carrying its own path, query, userinfo, or fragment would be silently
-    // ignored, so it is a configuration error rather than a merge rule.
-    let host = proxy
-        .upstream
-        .strip_prefix("https://")
-        .or_else(|| proxy.upstream.strip_prefix("http://"));
-    let is_origin = host.is_some_and(|host| {
-        !host.is_empty()
-            && !host
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control() || "/?#@\\".contains(c))
-    });
-    if !is_origin {
+    if !is_http_origin(&proxy.upstream) {
         return invalid(format!(
             "command '{}' has an 'upstream' for '{}' that is not an http(s) origin",
             policy.id, proxy.env_name
@@ -678,6 +664,17 @@ fn validate_proxy_secret(
         return invalid(format!(
             "command '{}' has an 'inject-header' for '{}' whose name is not an HTTP header name",
             policy.id, proxy.env_name
+        ));
+    }
+    // The proxy always derives the outbound authority from the configured
+    // upstream and owns message framing itself, so a credential configured
+    // to arrive in one of these headers could never be forwarded; rejecting
+    // it here keeps that contradiction a configuration error.
+    let proxy_owned = ["host", "content-length", "transfer-encoding", "connection"];
+    if proxy_owned.contains(&name.to_ascii_lowercase().as_str()) {
+        return invalid(format!(
+            "command '{}' has an 'inject-header' for '{}' that names '{}', a header the proxy itself controls",
+            policy.id, proxy.env_name, name
         ));
     }
 
@@ -699,6 +696,56 @@ fn validate_proxy_secret(
     }
 
     Ok(())
+}
+
+/// `http(s)://host[:port]` and nothing else. The upstream contributes only
+/// the scheme and the authority of proxied requests; path and query always
+/// come from the request itself, so a value carrying its own path, query,
+/// userinfo, or fragment would be silently ignored — a configuration error
+/// rather than a merge rule.
+fn is_http_origin(upstream: &str) -> bool {
+    let Some(authority) = upstream
+        .strip_prefix("https://")
+        .or_else(|| upstream.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let (host_is_valid, port) = if let Some(rest) = authority.strip_prefix('[') {
+        // A bracketed IPv6 literal is the one host form carrying ':'.
+        let Some((host, after)) = rest.split_once(']') else {
+            return false;
+        };
+        let host_is_valid = !host.is_empty()
+            && host
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.');
+        let port = match after.strip_prefix(':') {
+            Some(port) => Some(port),
+            None if after.is_empty() => None,
+            None => return false,
+        };
+        (host_is_valid, port)
+    } else {
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        // Rejecting ':' here is what limits a name-form authority to one
+        // optional port; 'h:80:90' leaves ':80' in the host.
+        let host_is_valid = !host.is_empty()
+            && !host
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control() || "/?#@\\:[]".contains(c));
+        (host_is_valid, port)
+    };
+    host_is_valid
+        && match port {
+            None => true,
+            Some(port) => {
+                port.chars().all(|c| c.is_ascii_digit())
+                    && port.parse::<u32>().is_ok_and(|n| (1..=65535).contains(&n))
+            }
+        }
 }
 
 #[cfg(test)]
@@ -1129,6 +1176,22 @@ iwaya version=1 {
     }
 
     #[test]
+    fn accepts_an_upstream_origin_with_a_port() {
+        for upstream in [
+            "https://u.example:8443",
+            "http://127.0.0.1:8080",
+            "https://[::1]:8080",
+        ] {
+            parse(&policy_config(&proxy_secret(
+                upstream,
+                "B",
+                r#""x-api-key" "{}""#,
+            )))
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_an_upstream_that_is_not_an_origin() {
         for upstream in [
             "u.example",
@@ -1136,6 +1199,11 @@ iwaya version=1 {
             "https://",
             "https://user@u.example",
             "ftp://u.example",
+            "https://:8080",
+            "https://u.example:not-a-port",
+            "https://u.example:80:90",
+            "https://u.example:99999",
+            "https://[::1",
         ] {
             let message = invalid_message(&policy_config(&proxy_secret(
                 upstream,
@@ -1144,6 +1212,33 @@ iwaya version=1 {
             )));
             assert!(message.contains("http(s) origin"), "{message}");
         }
+    }
+
+    #[test]
+    fn rejects_an_inject_header_naming_a_header_the_proxy_controls() {
+        for name in ["host", "Content-Length", "transfer-encoding", "Connection"] {
+            let message = invalid_message(&policy_config(&proxy_secret(
+                "https://u.example",
+                "B",
+                &format!(r#""{name}" "{{}}""#),
+            )));
+            assert!(message.contains("the proxy itself controls"), "{message}");
+        }
+    }
+
+    #[test]
+    fn parses_a_policy_mixing_secret_and_proxy_secret() {
+        let body = format!(
+            r#"secret "S" provider="b" secret-name="s"
+               {}"#,
+            proxy_secret("https://u.example", "B", r#""x-api-key" "{}""#)
+        );
+        let config = parse(&policy_config(&body)).unwrap();
+        let policy = config.policy(&CommandId::new("c")).unwrap();
+        assert_eq!(policy.secrets.len(), 1);
+        assert_eq!(policy.secrets[0].env_name, EnvName::new("S"));
+        assert_eq!(policy.proxy_secrets.len(), 1);
+        assert_eq!(policy.proxy_secrets[0].env_name, EnvName::new("A"));
     }
 
     #[test]

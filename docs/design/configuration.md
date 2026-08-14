@@ -173,6 +173,8 @@ policies {
 
 `inject-header`'s template must contain exactly one `{}` placeholder, which the proxy replaces with the raw value, and it must stay within printable ASCII, because it becomes an HTTP header value.
 
+`inject-header`'s name must not be a header the proxy itself controls — `Host`, `Content-Length`, `Transfer-Encoding`, or `Connection` — because the outbound authority is always derived from the configured upstream and message framing always belongs to the proxy, so a credential configured to arrive in one of them could never be forwarded.
+
 Every environment variable name one policy injects shares a single uniqueness scope: the first argument of every `secret`, the first argument of every `proxy-secret`, and every `base-url-env` value. A collision between any two of them is a configuration error, never an ordering rule or a last-write-wins choice.
 
 This document owns only the configuration shape. The phantom credential's semantics, the proxy execution model, and the guarantees proxy-backed delivery does and does not provide are defined with the execution and security models ([Docker Execution Context and Command Policy Model](docker-execution.md), [Security Model and Limitations](security-model.md)). An iwaya build that does not yet include the proxy execution path rejects an invocation whose selected policy declares a `proxy-secret`, so a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
