@@ -143,7 +143,7 @@ A command policy is not an allow or deny rule. Matching machinery of that kind �
 
 #### Proxy-Backed Secret Delivery
 
-A `secret` delivers the resolved raw value directly into the target process environment. A `proxy-secret` never does: the target process receives a per-invocation phantom credential, and the raw value is used only by an iwaya-run reverse proxy toward one fixed upstream. The two delivery modes are separate node types, so which mode a credential uses is explicit in the policy.
+A `secret` delivers the resolved raw value directly into the target process environment. A `proxy-secret` never does: the target process receives a per-invocation phantom credential, and the raw value is used only by an iwaya-run reverse proxy toward one fixed upstream. Why this delivery mode exists, its phantom-credential and proxy model, and the boundary it does and does not provide are recorded in [Add Proxy-Backed Secret Delivery with Phantom Credentials](../adr/20260820T162206Z_proxy-backed-secret-delivery.md); this document owns only the configuration shape.
 
 ```kdl
 policies {
@@ -169,15 +169,14 @@ policies {
 | `base-url-env` | yes | The environment variable name through which the target client is pointed at the proxy |
 | `inject-header` | yes | The name of the HTTP header the proxy rewrites, followed by the template the raw value is sent as |
 
-`upstream` must be an `http(s)://host[:port]` origin. Path, query, userinfo, and fragment are configuration errors rather than merge rules, because the path and query of a proxied request always come from the request itself, and the invocation must never influence the origin a raw value is sent to.
+Each of the following violations is a configuration error:
 
-`inject-header`'s template must contain exactly one `{}` placeholder, which the proxy replaces with the raw value, and it must stay within printable ASCII, because it becomes an HTTP header value.
+* `upstream` that is not an `http(s)://host[:port]` origin — no path, query, userinfo, or fragment.
+* An `inject-header` template without exactly one `{}` placeholder, or one leaving printable ASCII.
+* An `inject-header` name that is a header the proxy itself controls: `Host`, `Content-Length`, `Transfer-Encoding`, or `Connection`.
+* A collision among the environment variable names one policy injects — the first argument of every `secret`, the first argument of every `proxy-secret`, and every `base-url-env` value share a single uniqueness scope. A collision is never an ordering rule or a last-write-wins choice.
 
-`inject-header`'s name must not be a header the proxy itself controls — `Host`, `Content-Length`, `Transfer-Encoding`, or `Connection` — because the outbound authority is always derived from the configured upstream and message framing always belongs to the proxy, so a credential configured to arrive in one of them could never be forwarded.
-
-Every environment variable name one policy injects shares a single uniqueness scope: the first argument of every `secret`, the first argument of every `proxy-secret`, and every `base-url-env` value. A collision between any two of them is a configuration error, never an ordering rule or a last-write-wins choice.
-
-This document owns only the configuration shape. The phantom credential's semantics, the proxy execution model, and the guarantees proxy-backed delivery does and does not provide are defined with the execution and security models ([Docker Execution Context and Command Policy Model](docker-execution.md), [Security Model and Limitations](security-model.md)). An iwaya build that does not yet include the proxy execution path rejects an invocation whose selected policy declares a `proxy-secret`, so a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
+An iwaya build that does not yet include the proxy execution path rejects an invocation whose selected policy declares a `proxy-secret`, so a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
 
 ### Baseline Example
 
