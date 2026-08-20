@@ -98,6 +98,7 @@ mod tests {
                 provider: ProviderId::new("bws-default"),
                 secret_name: SecretName::new("ANTHROPIC_AUTH_TOKEN"),
             }],
+            proxy_secrets: vec![],
         };
 
         let argv = build_argv(&context, &policy, &["--resume".to_string()]);

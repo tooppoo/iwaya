@@ -141,6 +141,43 @@ The declared environment variable names, together with the provider and secret n
 
 A command policy is not an allow or deny rule. Matching machinery of that kind — argument patterns, rule priority, fallback, repository matching — has no place in the model, because none of it would constrain what the target command can do with the credential it received.
 
+#### Proxy-Backed Secret Delivery
+
+A `secret` delivers the resolved raw value directly into the target process environment. A `proxy-secret` never does: the target process receives a per-invocation phantom credential, and the raw value is used only by an iwaya-run reverse proxy toward one fixed upstream. Why this delivery mode exists, its phantom-credential and proxy model, and the boundary it does and does not provide are recorded in [Add Proxy-Backed Secret Delivery with Phantom Credentials](../adr/20260820T162206Z_proxy-backed-secret-delivery.md); this document owns only the configuration shape.
+
+```kdl
+policies {
+  command "claude" {
+    proxy-secret "ANTHROPIC_AUTH_TOKEN" {
+      provider "bws-default"
+      secret-name "ANTHROPIC_AUTH_TOKEN"
+
+      upstream "https://api.anthropic.com"
+      base-url-env "ANTHROPIC_BASE_URL"
+      inject-header "x-api-key" "{}"
+    }
+  }
+}
+```
+
+| Element | Required | Meaning |
+|---|---|---|
+| `proxy-secret` first argument | yes | The environment variable name the phantom credential is injected as; the raw value is never injected under it |
+| `provider` | yes | The identifier of the provider that supplies the raw value |
+| `secret-name` | yes | The name of the secret within that provider |
+| `upstream` | yes | The fixed origin the proxy forwards requests to |
+| `base-url-env` | yes | The environment variable name through which the target client is pointed at the proxy |
+| `inject-header` | yes | The name of the HTTP header the proxy rewrites, followed by the template the raw value is sent as |
+
+Each of the following violations is a configuration error:
+
+* `upstream` that is not an `http(s)://host[:port]` origin — no path, query, userinfo, or fragment.
+* An `inject-header` template without exactly one `{}` placeholder, or one leaving printable ASCII.
+* An `inject-header` name that is a header the proxy itself controls: `Host`, `Content-Length`, `Transfer-Encoding`, or `Connection`.
+* A collision among the environment variable names one policy injects — the first argument of every `secret`, the first argument of every `proxy-secret`, and every `base-url-env` value share a single uniqueness scope. A collision is never an ordering rule or a last-write-wins choice.
+
+An iwaya build that does not yet include the proxy execution path rejects an invocation whose selected policy declares a `proxy-secret`, so a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
+
 ### Baseline Example
 
 ```kdl
