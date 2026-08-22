@@ -8,7 +8,9 @@
 //! are single lines on stderr, usage errors and help are rendered by clap
 //! (which exits with 2, the provisional usage category), and the exit codes
 //! below are provisional; they distinguish the failure stages the model
-//! requires to stay distinguishable.
+//! requires to stay distinguishable. One exception to the usage category:
+//! a bare `iwaya` is a request for orientation, not a mistake, so it renders
+//! the same help `--help` renders, on stdout with exit 0.
 
 mod bws;
 mod config;
@@ -19,7 +21,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
 
 use config::{CommandId, ContextId, Provider, SecretName};
 
@@ -91,7 +94,20 @@ impl Failure {
 }
 
 fn main() -> ExitCode {
-    let Cli::Exec { context, command, args } = Cli::parse();
+    let parsed = Cli::try_parse().unwrap_or_else(|error| {
+        // A bare `iwaya` behaves exactly like `iwaya --help`: help on
+        // stdout, exit 0. Every other malformed invocation stays a clap
+        // usage error on stderr with exit 2.
+        if matches!(
+            error.kind(),
+            ErrorKind::MissingSubcommand | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        ) {
+            let _ = Cli::command().print_help();
+            std::process::exit(0);
+        }
+        error.exit()
+    });
+    let Cli::Exec { context, command, args } = parsed;
     let invocation = Invocation {
         context: ContextId::new(&context),
         command: CommandId::new(&command),
@@ -223,7 +239,9 @@ mod tests {
 
     #[test]
     fn rejects_malformed_invocations() {
-        assert!(parse(&[]).is_err(), "a subcommand is required");
+        // At the clap layer a missing subcommand is still an error; main
+        // renders that one case as `--help` output (e2e/usage.repor).
+        assert!(parse(&[]).is_err(), "a missing subcommand is a parse error");
         assert!(parse(&["run"]).is_err(), "unknown subcommand");
         assert!(parse(&["exec", "cmd"]).is_err(), "'--context' is required");
         assert!(parse(&["exec", "--context"]).is_err(), "'--context' requires a value");

@@ -29,7 +29,7 @@ case "reports a configuration file that violates the model" {
       providers {
         bws "b" {
           project "p"
-          access-token { exec "true" }
+          access-token { exec "false" }
         }
       }
       policies {

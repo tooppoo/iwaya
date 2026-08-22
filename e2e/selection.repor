@@ -8,7 +8,7 @@ before_each {
       providers {
         bws "b" {
           project "p"
-          access-token { exec "true" }
+          access-token { exec "false" }
         }
       }
       contexts {
