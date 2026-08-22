@@ -23,8 +23,14 @@ const PREFIX: &str = "iwaya-phantom-";
 /// `Debug`/`Display`, so a phantom cannot ride along in formatted
 /// diagnostics; unlike a `Secret`, its value is deliberately delivered to
 /// the target process environment.
+// The item-level allows below are temporary: the proxy execution path
+// (issue #31) is built incrementally, and nothing consumes a phantom yet.
+// They are per item, not module-wide, so an item that stays unused once
+// the proxy path lands is still flagged.
+#[allow(dead_code)]
 pub struct Phantom(String);
 
+#[allow(dead_code)]
 impl Phantom {
     /// Draws fresh OS entropy, so every call — across `proxy-secret`
     /// entries and across invocations — yields an unrelated value.
@@ -75,6 +81,7 @@ impl Phantom {
 /// The OS entropy source failed; without it no phantom is trustworthy, so
 /// the invocation must not proceed to proxy-backed delivery.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GenerateError {
     source: getrandom::Error,
 }
@@ -93,16 +100,36 @@ impl fmt::Display for GenerateError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn generates_the_documented_shape() {
+    fn generated_suffix() -> String {
         let phantom = Phantom::generate().unwrap();
-        let value = phantom.expose_to_target_env();
-        let suffix = value.strip_prefix("iwaya-phantom-").expect("prefix");
-        assert_eq!(suffix.len(), 64);
-        assert!(
-            suffix.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-            "{suffix}"
-        );
+        phantom
+            .expose_to_target_env()
+            .strip_prefix("iwaya-phantom-")
+            .expect("every phantom carries the documented prefix")
+            .to_string()
+    }
+
+    #[test]
+    fn generates_the_documented_prefix() {
+        let phantom = Phantom::generate().unwrap();
+        assert!(phantom.expose_to_target_env().starts_with("iwaya-phantom-"));
+    }
+
+    #[test]
+    fn generates_a_64_character_suffix() {
+        assert_eq!(generated_suffix().len(), 64);
+    }
+
+    #[test]
+    fn generates_a_hexadecimal_suffix() {
+        let suffix = generated_suffix();
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{suffix}");
+    }
+
+    #[test]
+    fn generates_a_lowercase_suffix() {
+        let suffix = generated_suffix();
+        assert!(suffix.chars().all(|c| !c.is_ascii_uppercase()), "{suffix}");
     }
 
     #[test]
@@ -114,21 +141,33 @@ mod tests {
     }
 
     #[test]
-    fn matches_only_its_own_value() {
+    fn matches_its_own_value() {
         let phantom = Phantom::generate().unwrap();
-        let value = phantom.expose_to_target_env().to_string();
-        assert!(phantom.matches_presented(&value));
+        assert!(phantom.matches_presented(phantom.expose_to_target_env()));
+    }
 
-        // Same length, one byte off: the constant-time path must reject it.
-        let mut altered = value.clone().into_bytes();
+    #[test]
+    fn rejects_a_same_length_value_differing_in_one_byte() {
+        let phantom = Phantom::generate().unwrap();
+        // Exercises the constant-time path: the length check cannot reject
+        // this value, only the byte comparison can.
+        let mut altered = phantom.expose_to_target_env().to_string().into_bytes();
         let last = altered.last_mut().unwrap();
         *last = if *last == b'0' { b'1' } else { b'0' };
         assert!(!phantom.matches_presented(&String::from_utf8(altered).unwrap()));
+    }
 
-        // Prefix alone, truncations, and extensions are length mismatches.
-        assert!(!phantom.matches_presented("iwaya-phantom-"));
-        assert!(!phantom.matches_presented(&value[..value.len() - 1]));
-        assert!(!phantom.matches_presented(&format!("{value}0")));
-        assert!(!phantom.matches_presented(""));
+    #[test]
+    fn rejects_a_value_of_different_length() {
+        let phantom = Phantom::generate().unwrap();
+        let value = phantom.expose_to_target_env().to_string();
+        for presented in [
+            "iwaya-phantom-",
+            &value[..value.len() - 1],
+            &format!("{value}0"),
+            "",
+        ] {
+            assert!(!phantom.matches_presented(presented), "{presented}");
+        }
     }
 }

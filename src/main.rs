@@ -14,9 +14,6 @@
 
 mod bws;
 mod config;
-// Consumed by the proxy execution path, which is built incrementally
-// (issue #31); unreferenced until that path lands.
-#[allow(dead_code)]
 mod phantom;
 mod run;
 mod secret;
