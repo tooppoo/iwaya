@@ -1,0 +1,15 @@
+reportage {
+  config {
+    version 1
+  }
+
+  commands {
+    command "iwaya" {
+      exec "target/debug/iwaya"
+    }
+  }
+
+  tests {
+    path "e2e/*.repor"
+  }
+}

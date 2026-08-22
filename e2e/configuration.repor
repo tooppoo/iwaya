@@ -1,0 +1,50 @@
+# Configuration failures exit with the provisional configuration category 3
+# and execute nothing. The three ConfigError variants stay distinguishable in
+# the diagnostic text (src/config/mod.rs).
+
+case "reports an unreadable configuration file" {
+  $ IWAYA_CONFIG=missing.kdl iwaya exec --context c cmd
+  assert {
+    exit 3
+    stderr contains "cannot read configuration file"
+    stdout empty
+  }
+}
+
+case "reports a configuration file that does not parse" {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+    ```
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context c cmd
+  assert {
+    exit 3
+    stderr contains "does not parse"
+    stdout empty
+  }
+}
+
+case "reports a configuration file that violates the model" {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "true" }
+        }
+      }
+      policies {
+        command "cmd" {
+          secret "TOKEN" provider="b" secret-name="x"
+          secret "TOKEN" provider="b" secret-name="y"
+        }
+      }
+    }
+    ```
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context c cmd
+  assert {
+    exit 3
+    stderr contains "is invalid"
+    stderr contains "declares environment variable 'TOKEN' more than once"
+    stdout empty
+  }
+}

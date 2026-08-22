@@ -1,0 +1,38 @@
+# A resolution failure exits with the provisional resolution category 5 and
+# executes nothing. Failing the access-token acquisition keeps the case
+# hermetic: the 'bws' CLI is never reached
+# (docs/design/configuration.md, "BWS Access Token").
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "false" }
+        }
+      }
+      contexts {
+        docker "ctx" {
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "cmd" {
+          secret "TOKEN" provider="b" secret-name="TOKEN"
+        }
+      }
+    }
+    ```
+}
+
+case "reports a failed secret resolution and executes nothing" {
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context ctx cmd
+  assert {
+    exit 5
+    stderr contains "secret resolution failed, nothing was executed"
+    stdout empty
+  }
+}

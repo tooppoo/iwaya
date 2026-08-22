@@ -1,0 +1,43 @@
+# Usage errors are rendered by clap and exit with the provisional usage
+# category 2 (src/main.rs module comment); nothing is executed.
+
+case "reports its version" {
+  $ iwaya --version
+  assert {
+    exit 0
+    stdout contains "iwaya"
+    stderr empty
+  }
+}
+
+case "rejects an invocation without a subcommand" {
+  $ iwaya
+  assert {
+    exit 2
+    stdout empty
+  }
+}
+
+case "rejects an exec invocation without a context" {
+  $ iwaya exec cmd
+  assert {
+    exit 2
+    stdout empty
+  }
+}
+
+case "rejects an unknown option" {
+  $ iwaya exec --context c -v cmd
+  assert {
+    exit 2
+    stdout empty
+  }
+}
+
+case "rejects target-command arguments outside the separator" {
+  $ iwaya exec --context c cmd extra
+  assert {
+    exit 2
+    stdout empty
+  }
+}

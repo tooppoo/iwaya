@@ -1,0 +1,62 @@
+# The happy path replaces iwaya with the runtime process. A fake runtime on
+# PATH receives the documented argv shape
+# (docs/design/docker-execution.md, "Invocation Construction") without a real
+# container; a policy with no secrets keeps the case free of providers.
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      contexts {
+        docker "ctx" {
+          runtime "fake-docker"
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+        docker "broken" {
+          runtime "no-such-runtime-zz"
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "plain" {
+        }
+      }
+    }
+    ```
+  write <"fake-docker"> ```
+    #!/bin/sh
+    echo "$@"
+    ```
+}
+
+case "executes the documented invocation through the runtime" {
+  $ chmod +x fake-docker
+  $ PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx plain
+  assert {
+    exit 0
+    stdout contains "exec --interactive --tty --user u --workdir /w target-container plain"
+    stderr empty
+  }
+}
+
+case "appends separator arguments unchanged" {
+  $ chmod +x fake-docker
+  $ PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx plain -- --resume
+  assert {
+    exit 0
+    stdout contains "target-container plain --resume"
+    stderr empty
+  }
+}
+
+case "reports a runtime that cannot start" {
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context broken plain
+  assert {
+    exit 6
+    stderr contains "cannot start runtime 'no-such-runtime-zz'"
+    stdout empty
+  }
+}
