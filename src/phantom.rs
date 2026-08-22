@@ -98,6 +98,8 @@ impl fmt::Display for GenerateError {
 
 #[cfg(test)]
 mod tests {
+    use test_case::test_case;
+
     use super::*;
 
     fn generated_suffix() -> String {
@@ -157,17 +159,17 @@ mod tests {
         assert!(!phantom.matches_presented(&String::from_utf8(altered).unwrap()));
     }
 
-    #[test]
-    fn rejects_a_value_of_different_length() {
+    // Each case mutates the real phantom value, because two of the inputs
+    // (truncation, extension) only exist relative to it. Extension is the
+    // load-bearing case: without the length guard, `zip` would stop at the
+    // shorter side and an extended value would wrongly match.
+    #[test_case(&|_| "iwaya-phantom-".to_string() ; "prefix alone")]
+    #[test_case(&|v| v[..v.len() - 1].to_string() ; "truncated by one")]
+    #[test_case(&|v| format!("{v}0") ; "extended by one")]
+    #[test_case(&|_| String::new() ; "empty")]
+    fn rejects_a_value_of_different_length(mutate: &dyn Fn(&str) -> String) {
         let phantom = Phantom::generate().unwrap();
-        let value = phantom.expose_to_target_env().to_string();
-        for presented in [
-            "iwaya-phantom-",
-            &value[..value.len() - 1],
-            &format!("{value}0"),
-            "",
-        ] {
-            assert!(!phantom.matches_presented(presented), "{presented}");
-        }
+        let presented = mutate(phantom.expose_to_target_env());
+        assert!(!phantom.matches_presented(&presented));
     }
 }
