@@ -105,9 +105,18 @@ impl fmt::Display for BindError {
 /// contain a credential attempt.
 #[allow(dead_code)]
 enum Rejection {
+    /// The request itself is malformed: a non-origin-form target, an
+    /// unusable method, or a credential header presented more than once.
     BadRequest(&'static str),
+    /// No configured `proxy-secret` recognised the request: no credential
+    /// header carried a phantom that validated against any route.
     NoMatch,
+    /// The request's credential headers validated against more than one
+    /// configured `proxy-secret`, so the upstream to inject toward is
+    /// undecidable.
     Ambiguous,
+    /// The request selected exactly one route, but the upstream call itself
+    /// failed (connection, TLS, or transport error).
     Upstream(ureq::Error),
 }
 
@@ -271,12 +280,12 @@ fn is_origin_form(target: &str) -> bool {
     target.starts_with('/') && !target.starts_with("//") && !target.starts_with("/\\")
 }
 
-/// What the proxy refuses to forward toward the upstream: hop-by-hop
-/// headers (RFC 9110 §7.6.1), the fields the proxy derives itself (Host
-/// from the configured upstream, framing from the actual body), and every
-/// configured credential header name — the matched one is rewritten, and a
-/// non-matched one must not smuggle a caller-chosen value upstream in a
-/// credential position.
+/// Returns true when a caller's request header is passed through to the upstream, and false when the proxy must own it instead.
+///
+/// The proxy owns, and therefore does not forward, three kinds of header.
+/// Hop-by-hop headers (RFC 9110 §7.6.1) belong to the client-proxy connection, not to the upstream request.
+/// Host and the framing headers are re-derived — Host from the configured upstream, framing from the actual body.
+/// Every configured credential header is withheld too: the matched one is re-added with the raw value, and a non-matched one must not smuggle a caller-chosen value upstream in a credential position.
 #[allow(dead_code)]
 fn forwards_request_header(name: &str, routes: &[ProxyRoute]) -> bool {
     if is_hop_by_hop(name) {
@@ -511,6 +520,9 @@ mod tests {
             .call()
             .unwrap();
 
+        // Body framing is carried entirely by the Transfer-Encoding and
+        // Content-Length headers, so "no body framing" is precisely the
+        // absence of both from the forwarded request.
         let names: Vec<String> = upstream
             .last()
             .headers
@@ -607,8 +619,8 @@ mod tests {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
-        // No ordinary client emits an absolute-form target, so the request
-        // is written raw.
+        // The threat is a process inside the target container hand-crafting a request that names its own origin in the request-target, to make the proxy send the injected credential to `evil.example` instead of the configured upstream.
+        // No ordinary HTTP client emits an absolute-form target, so the request is written to the socket raw.
         use std::io::{BufRead, BufReader, Write};
         let mut stream = std::net::TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
         write!(
@@ -624,6 +636,9 @@ mod tests {
         assert_eq!(upstream.request_count(), 0);
     }
 
+    // Ambiguous here means the request carried valid phantoms for two
+    // different routes at once, so which route's upstream and credential to
+    // use is undecidable and the proxy rejects rather than guessing.
     #[test]
     fn rejects_an_ambiguous_credential_match_without_contacting_the_upstream() {
         let upstream = Upstream::start(Behavior::Echo);
@@ -657,9 +672,7 @@ mod tests {
         assert_eq!(upstream.request_count(), 0);
     }
 
-    // Without these checks, a caller-supplied value could override what the
-    // proxy must derive itself (authority, framing) or ride along on the
-    // client-proxy connection or in a credential position.
+    // Without these checks, a caller-supplied value could override what the proxy must derive itself (authority, framing), ride along on the client-proxy connection, or occupy a credential position.
     #[test_case("host")]
     #[test_case("content-length")]
     #[test_case("transfer-encoding")]
