@@ -22,7 +22,8 @@ impl Secret {
     }
 
     /// Reads the raw value for injection into the credential header of a
-    /// proxied upstream request, after the phantom credential validated
+    /// proxied upstream request, after the phantom credential has been
+    /// validated
     /// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md). The
     /// only permitted call site is the reverse proxy's header rewrite; the
     /// value must never reach the proxy's own diagnostics or responses.

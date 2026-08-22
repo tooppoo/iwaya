@@ -225,11 +225,12 @@ fn forward(
     sent.map_err(Rejection::Upstream)
 }
 
-/// Exactly one route must match, and a route only matches when its
-/// credential header appears exactly once: a duplicated header cannot be
+/// Exactly one route must match. A credential header that appears more than
+/// once is a malformed presentation, not a failed match: it cannot be
 /// attributed to one value, and treating "any occurrence matches" as a
 /// match would let extra caller-chosen occurrences ride along on an
-/// authenticated request.
+/// authenticated request. Such a request is rejected as a bad request
+/// before any phantom comparison, so it never reaches an upstream.
 #[allow(dead_code)]
 fn select_route<'r>(
     routes: &'r [ProxyRoute],
@@ -242,10 +243,14 @@ fn select_route<'r>(
             .filter(|(name, _)| name.eq_ignore_ascii_case(&route.header_name))
             .map(|(_, value)| value.as_str())
             .collect();
-        if let [value] = values.as_slice()
-            && route.phantom.matches_presented(value)
-        {
-            matched.push(route);
+        match values.as_slice() {
+            [value] if route.phantom.matches_presented(value) => matched.push(route),
+            [_] | [] => {}
+            _ => {
+                return Err(Rejection::BadRequest(
+                    "a proxied credential header appears more than once",
+                ));
+            }
         }
     }
     match matched.as_slice() {
@@ -438,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn forwards_path_and_query_and_injects_the_raw_credential() {
+    fn forwards_to_the_upstream_with_the_credential_injected_and_path_preserved() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -460,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_the_outbound_host_from_the_upstream() {
+    fn forwards_to_the_upstream_under_the_upstream_host() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -479,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_the_upstream_response_body() {
+    fn returns_the_upstream_response_body_to_the_client() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -496,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn forwards_a_bodyless_get_without_a_body_framing_header() {
+    fn forwards_a_bodyless_get_to_the_upstream_without_body_framing() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -560,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_duplicated_credential_header() {
+    fn rejects_a_duplicated_credential_header_without_contacting_the_upstream() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -573,12 +578,14 @@ mod tests {
             .unwrap();
         let response = client().run(outbound).unwrap();
 
-        assert_eq!(response.status().as_u16(), 401);
+        // A credential header that cannot be attributed to one value is a
+        // malformed request, not a failed match.
+        assert_eq!(response.status().as_u16(), 400);
         assert_eq!(upstream.request_count(), 0);
     }
 
     #[test]
-    fn returns_an_upstream_redirect_unfollowed() {
+    fn returns_an_upstream_redirect_to_the_client_unfollowed() {
         let upstream = Upstream::start(Behavior::Redirect("http://redirect-target.example/next"));
         let proxy = start_proxy(upstream.port);
 
@@ -596,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_absolute_form_target() {
+    fn rejects_an_absolute_form_target_without_contacting_the_upstream() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
 
@@ -618,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_ambiguous_credential_match() {
+    fn rejects_an_ambiguous_credential_match_without_contacting_the_upstream() {
         let upstream = Upstream::start(Behavior::Echo);
         let first = Phantom::generate().unwrap();
         let second = Phantom::generate().unwrap();
