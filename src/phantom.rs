@@ -148,21 +148,21 @@ mod tests {
         assert!(phantom.matches_presented(phantom.expose_to_target_env()));
     }
 
+    // Without this test, an implementation that never compares content —
+    // length-only matching, or a byte comparison that stops before the last
+    // byte — would still pass every other test in this module.
     #[test]
     fn rejects_a_same_length_value_differing_in_one_byte() {
         let phantom = Phantom::generate().unwrap();
-        // Exercises the constant-time path: the length check cannot reject
-        // this value, only the byte comparison can.
         let mut altered = phantom.expose_to_target_env().to_string().into_bytes();
         let last = altered.last_mut().unwrap();
         *last = if *last == b'0' { b'1' } else { b'0' };
         assert!(!phantom.matches_presented(&String::from_utf8(altered).unwrap()));
     }
 
-    // Each case mutates the real phantom value, because two of the inputs
-    // (truncation, extension) only exist relative to it. Extension is the
-    // load-bearing case: without the length guard, `zip` would stop at the
-    // shorter side and an extended value would wrongly match.
+    // Without this test, removing the length guard would go unnoticed:
+    // `zip` stops at the shorter side, so the extended value would wrongly
+    // match while every same-length test still passes.
     #[test_case(&|_| "iwaya-phantom-".to_string() ; "prefix alone")]
     #[test_case(&|v| v[..v.len() - 1].to_string() ; "truncated by one")]
     #[test_case(&|v| format!("{v}0") ; "extended by one")]
