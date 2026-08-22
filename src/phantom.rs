@@ -148,9 +148,9 @@ mod tests {
         assert!(phantom.matches_presented(phantom.expose_to_target_env()));
     }
 
-    // Without this test, an implementation that never compares content —
-    // length-only matching, or a byte comparison that stops before the last
-    // byte — would still pass every other test in this module.
+    // Without this test, a byte comparison that stops before the last byte
+    // would go unnoticed: every other mismatching value in this module
+    // differs from the phantom long before its final byte.
     #[test]
     fn rejects_a_same_length_value_differing_in_one_byte() {
         let phantom = Phantom::generate().unwrap();
