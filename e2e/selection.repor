@@ -1,0 +1,46 @@
+# An unknown context or command exits with the provisional selection
+# category 4; nothing is resolved and nothing is executed
+# (docs/design/docker-execution.md, "Error Behavior").
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "false" }
+        }
+      }
+      contexts {
+        docker "ctx" {
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "cmd" {
+          secret "TOKEN" provider="b" secret-name="TOKEN"
+        }
+      }
+    }
+    ```
+}
+
+case "rejects an unknown context" {
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context nope cmd
+  assert {
+    exit 4
+    stderr contains "iwaya: error: unknown context 'nope'"
+    stdout empty
+  }
+}
+
+case "rejects an unknown command" {
+  $ IWAYA_CONFIG=config.kdl iwaya exec --context ctx nope
+  assert {
+    exit 4
+    stderr contains "unknown command 'nope'"
+    stdout empty
+  }
+}
