@@ -14,6 +14,7 @@
 
 mod bws;
 mod config;
+mod phantom;
 mod run;
 mod secret;
 
