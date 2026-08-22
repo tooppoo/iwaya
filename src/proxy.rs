@@ -105,8 +105,7 @@ impl fmt::Display for BindError {
 /// contain a credential attempt.
 #[allow(dead_code)]
 enum Rejection {
-    /// The request itself is malformed: a non-origin-form target, an
-    /// unusable method, or a credential header presented more than once.
+    /// The request itself cannot be forwarded: a non-origin-form target, an unusable method, a credential header presented more than once, or an outbound request that could not be constructed from it.
     BadRequest(&'static str),
     /// No configured `proxy-secret` recognised the request: no credential
     /// header carried a phantom that validated against any route.
@@ -282,9 +281,10 @@ fn is_origin_form(target: &str) -> bool {
 
 /// Returns true when a caller's request header is passed through to the upstream, and false when the proxy must own it instead.
 ///
-/// The proxy owns, and therefore does not forward, three kinds of header.
+/// The proxy owns, and therefore does not forward, the following headers.
 /// Hop-by-hop headers (RFC 9110 §7.6.1) belong to the client-proxy connection, not to the upstream request.
 /// Host and the framing headers are re-derived — Host from the configured upstream, framing from the actual body.
+/// Expect is withheld because the proxy runs the upstream body leg itself and must not promise the caller's 100-continue on the upstream's behalf.
 /// Every configured credential header is withheld too: the matched one is re-added with the raw value, and a non-matched one must not smuggle a caller-chosen value upstream in a credential position.
 #[allow(dead_code)]
 fn forwards_request_header(name: &str, routes: &[ProxyRoute]) -> bool {
