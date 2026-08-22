@@ -54,7 +54,11 @@ impl Phantom {
     /// The comparison examines every byte regardless of where the first
     /// mismatch occurs, so response timing does not tell a probing caller
     /// how much of a guess was right. Only the length check short-circuits:
-    /// every phantom's length is fixed and public.
+    /// every phantom's length is fixed and public. Rust makes no timing
+    /// guarantee for the bare OR-fold — an optimizer may rewrite an
+    /// equality reduction into an early exit — so the accumulator passes
+    /// through `black_box` each step; that barrier is what upholds the
+    /// every-byte claim under optimization.
     pub fn matches_presented(&self, presented: &str) -> bool {
         let ours = self.0.as_bytes();
         let theirs = presented.as_bytes();
@@ -63,7 +67,7 @@ impl Phantom {
         }
         ours.iter()
             .zip(theirs)
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            .fold(0u8, |acc, (a, b)| std::hint::black_box(acc | (a ^ b)))
             == 0
     }
 }
