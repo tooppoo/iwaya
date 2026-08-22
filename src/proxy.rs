@@ -197,10 +197,18 @@ fn forward(
         .replacen("{}", route.raw_value.expose_to_upstream_header(), 1);
     builder = builder.header(route.header_name.as_str(), injected);
 
-    // `Some(0)` is a declared empty body; `None` means the client streams
-    // (chunked), so a body is assumed. Framing toward the upstream is
-    // re-derived by the HTTP client, never copied from the caller.
-    let has_body = request.body_length() != Some(0);
+    // Match tiny_http's own reader selection: a body exists only when a
+    // positive Content-Length was given, or a Transfer-Encoding was. A bare
+    // bodyless GET/HEAD reports `body_length() == None` too, so keying off
+    // "not Some(0)" would wrap it in an empty chunked upload — framing that
+    // strict upstreams reject. Re-derived framing for a bodyless request is
+    // no body framing, not an empty stream.
+    let has_body = match request.body_length() {
+        Some(length) => length > 0,
+        None => header_pairs
+            .iter()
+            .any(|(name, _)| name == "transfer-encoding"),
+    };
     let sent = if has_body {
         let mut reader = request.as_reader();
         let body = ureq::SendBody::from_reader(&mut reader);
@@ -248,11 +256,14 @@ fn select_route<'r>(
 }
 
 /// Origin-form only (RFC 9112 §3.2.1): an absolute URI, an authority form,
-/// or a scheme-relative `//host` path could carry a caller-chosen origin
-/// into the upstream URL.
+/// or a scheme-relative path could carry a caller-chosen origin into the
+/// upstream URL. Both `//host` and `/\host` are rejected: WHATWG URL
+/// parsing (browsers, many CDN/edge stacks, Node) treats `\` as `/` for
+/// special schemes, so a layer behind the upstream could read a forwarded
+/// `/\host` path as the same scheme-relative authority `//host` denotes.
 #[allow(dead_code)]
 fn is_origin_form(target: &str) -> bool {
-    target.starts_with('/') && !target.starts_with("//")
+    target.starts_with('/') && !target.starts_with("//") && !target.starts_with("/\\")
 }
 
 /// What the proxy refuses to forward toward the upstream: hop-by-hop
@@ -485,6 +496,27 @@ mod tests {
     }
 
     #[test]
+    fn forwards_a_bodyless_get_without_a_body_framing_header() {
+        let upstream = Upstream::start(Behavior::Echo);
+        let proxy = start_proxy(upstream.port);
+
+        client()
+            .get(format!("http://127.0.0.1:{}/", proxy.port))
+            .header("x-api-key", &proxy.phantom_value)
+            .call()
+            .unwrap();
+
+        let names: Vec<String> = upstream
+            .last()
+            .headers
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert!(!names.iter().any(|n| n == "transfer-encoding"), "{names:?}");
+        assert!(!names.iter().any(|n| n == "content-length"), "{names:?}");
+    }
+
+    #[test]
     fn streams_the_request_body_to_the_upstream() {
         let upstream = Upstream::start(Behavior::Echo);
         let proxy = start_proxy(upstream.port);
@@ -646,6 +678,7 @@ mod tests {
     #[test_case("/v1/messages", true ; "origin form")]
     #[test_case("/", true ; "root")]
     #[test_case("//evil.example/path", false ; "scheme relative")]
+    #[test_case("/\\evil.example/path", false ; "backslash scheme relative")]
     #[test_case("http://evil.example/", false ; "absolute form")]
     fn accepts_only_origin_form_targets(target: &str, accepted: bool) {
         assert_eq!(is_origin_form(target), accepted);
