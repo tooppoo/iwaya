@@ -12,6 +12,7 @@ Accepted:
 
 * [Define iwaya as a Docker-Context Secret Injection Runner](20260806T192918Z_docker-context-secret-injection-runner.md) — iwaya's architectural identity, CLI contract, configuration model, and secret-delivery model.
 * [Add Proxy-Backed Secret Delivery with Phantom Credentials](20260820T162206Z_proxy-backed-secret-delivery.md) — the `proxy-secret` delivery mode: why the raw value stays out of the target container, and the phantom-credential, sidecar-proxy, and embedded-image decisions behind it.
+* [Use a Blocking HTTP Stack (tiny_http + ureq) for the Reverse Proxy](20260822T162745Z_blocking-http-stack-for-proxy.md) — why the credential-aware reverse proxy uses a blocking, thread-per-connection stack instead of adopting an async runtime.
 * [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) — why iwaya must not be described as a sandbox, and what that costs.
 * [Implement iwaya in Rust](20260808T171732Z_implement-iwaya-in-rust.md) — the implementation language.
 

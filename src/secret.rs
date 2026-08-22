@@ -13,11 +13,23 @@ impl Secret {
         Secret(value)
     }
 
-    /// The only way to read the raw value. Call sites must remain few enough
-    /// to enumerate, and each must set the environment of a subprocess: the
-    /// Docker-compatible runtime for a policy secret, the provider subprocess
-    /// for a provider credential.
+    /// Reads the raw value for subprocess environment delivery. Call sites
+    /// must remain few enough to enumerate, and each must set the
+    /// environment of a subprocess: the Docker-compatible runtime for a
+    /// policy secret, the provider subprocess for a provider credential.
     pub fn expose_to_subprocess_env(&self) -> &str {
+        &self.0
+    }
+
+    /// Reads the raw value for injection into the credential header of a
+    /// proxied upstream request, after the phantom credential validated
+    /// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md). The
+    /// only permitted call site is the reverse proxy's header rewrite; the
+    /// value must never reach the proxy's own diagnostics or responses.
+    // Unread until the proxy execution mode calls the reverse proxy
+    // (issue #31).
+    #[allow(dead_code)]
+    pub fn expose_to_upstream_header(&self) -> &str {
         &self.0
     }
 }

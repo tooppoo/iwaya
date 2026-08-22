@@ -15,6 +15,7 @@
 mod bws;
 mod config;
 mod phantom;
+mod proxy;
 mod run;
 mod secret;
 
