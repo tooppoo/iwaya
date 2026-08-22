@@ -6,7 +6,7 @@ case "reports an unreadable configuration file" {
   $ IWAYA_CONFIG=missing.kdl iwaya exec --context c cmd
   assert {
     exit 3
-    stderr contains "cannot read configuration file"
+    stderr contains "iwaya: error: cannot read configuration file"
     stdout empty
   }
 }

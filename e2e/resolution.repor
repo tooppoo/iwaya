@@ -32,7 +32,7 @@ case "reports a failed secret resolution and executes nothing" {
   $ IWAYA_CONFIG=config.kdl iwaya exec --context ctx cmd
   assert {
     exit 5
-    stderr contains "secret resolution failed, nothing was executed"
+    stderr contains "iwaya: error: secret resolution failed, nothing was executed"
     stdout empty
   }
 }

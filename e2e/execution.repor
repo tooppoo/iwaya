@@ -56,7 +56,7 @@ case "reports a runtime that cannot start" {
   $ IWAYA_CONFIG=config.kdl iwaya exec --context broken plain
   assert {
     exit 6
-    stderr contains "cannot start runtime 'no-such-runtime-zz'"
+    stderr contains "iwaya: error: cannot start runtime 'no-such-runtime-zz'"
     stdout empty
   }
 }

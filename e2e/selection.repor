@@ -31,7 +31,7 @@ case "rejects an unknown context" {
   $ IWAYA_CONFIG=config.kdl iwaya exec --context nope cmd
   assert {
     exit 4
-    stderr contains "unknown context 'nope'"
+    stderr contains "iwaya: error: unknown context 'nope'"
     stdout empty
   }
 }
