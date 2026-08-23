@@ -4,7 +4,8 @@
 
 use std::fmt;
 use std::os::unix::process::CommandExt;
-use std::process::Command;
+use std::os::unix::process::ExitStatusExt;
+use std::process::{Command, ExitStatus};
 
 use crate::config::{CommandPolicy, DockerContext, EnvName};
 use crate::secret::Secret;
@@ -74,6 +75,62 @@ pub fn exec_runtime(
     }
 }
 
+/// Runs the runtime as a child of iwaya instead of replacing iwaya with it,
+/// so iwaya stays alive alongside it — the supervision a proxy-backed
+/// invocation needs, where a sidecar proxy must outlive the target's start
+/// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md, "Process
+/// model"). Returns the exit code to propagate, or an error if the runtime
+/// could not be started.
+///
+/// The direct-`secret` path keeps using `exec_runtime`; this path exists for
+/// proxy-backed delivery, which is not yet wired into execution (issue #31),
+/// so signal forwarding from iwaya to the child is deliberately left to the
+/// unit that wires it in — it carries its own dependency decision.
+// Unread until the proxy execution mode wires it in (issue #31).
+#[allow(dead_code)]
+pub fn supervise_runtime(
+    context: &DockerContext,
+    policy: &CommandPolicy,
+    environment: Vec<(EnvName, Secret)>,
+    user_args: &[String],
+) -> Result<u8, ExecError> {
+    let argv = build_argv(context, policy, user_args);
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    for (name, value) in &environment {
+        // Same injection contract as `exec_runtime`: overwrite any inherited
+        // same-named variable rather than inheriting it.
+        command.env(name.as_str(), value.expose_to_subprocess_env());
+    }
+    supervise(command, &context.runtime)
+}
+
+/// Spawns a prepared command with iwaya's own stdin/stdout/stderr (the
+/// default for a spawned child), waits for it, and reduces its status to an
+/// exit code. Split from `supervise_runtime` so the wait-and-propagate
+/// behavior is testable without constructing a Docker-shaped invocation.
+#[allow(dead_code)]
+fn supervise(mut command: Command, runtime: &str) -> Result<u8, ExecError> {
+    let error = |source| ExecError {
+        runtime: runtime.to_string(),
+        source,
+    };
+    let mut child = command.spawn().map_err(error)?;
+    let status = child.wait().map_err(error)?;
+    Ok(exit_code_of(status))
+}
+
+/// Follows the shell convention so the propagated code is the one a caller
+/// already expects: a normal exit yields its own code, and a signal-killed
+/// child yields 128 + the signal number.
+#[allow(dead_code)]
+fn exit_code_of(status: ExitStatus) -> u8 {
+    match status.code() {
+        Some(code) => code as u8,
+        None => 128u8.wrapping_add(status.signal().unwrap_or(0) as u8),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +178,49 @@ mod tests {
                 "--resume",
             ]
         );
+    }
+
+    #[test]
+    fn propagates_a_normal_child_exit_code() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exit 7"]);
+        assert_eq!(supervise(command, "sh").unwrap(), 7);
+    }
+
+    #[test]
+    fn maps_a_signal_killed_child_to_128_plus_the_signal() {
+        let mut command = Command::new("sh");
+        // SIGTERM is 15, so the shell convention yields 143.
+        command.args(["-c", "kill -TERM $$"]);
+        assert_eq!(supervise(command, "sh").unwrap(), 143);
+    }
+
+    #[test]
+    fn passes_arguments_through_to_the_child() {
+        let dir = std::env::temp_dir().join(format!("iwaya-supervise-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("arg.txt");
+        let _ = std::fs::remove_file(&marker);
+
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf %s \"$1\" > \"$2\"",
+            "sh",
+            "forwarded-value",
+            marker.to_str().unwrap(),
+        ]);
+        assert_eq!(supervise(command, "sh").unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "forwarded-value");
+
+        let _ = std::fs::remove_file(&marker);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn reports_a_runtime_that_cannot_start() {
+        let command = Command::new("no-such-runtime-zz-iwaya");
+        let error = supervise(command, "no-such-runtime-zz-iwaya").unwrap_err();
+        assert_eq!(error.runtime, "no-such-runtime-zz-iwaya");
     }
 }
