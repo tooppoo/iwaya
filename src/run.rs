@@ -116,8 +116,19 @@ fn supervise(mut command: Command, runtime: &str) -> Result<u8, ExecError> {
         source,
     };
     let mut child = command.spawn().map_err(error)?;
-    let status = child.wait().map_err(error)?;
-    Ok(exit_code_of(status))
+    match child.wait() {
+        Ok(status) => Ok(exit_code_of(status)),
+        Err(source) => {
+            // `wait` failed but the child may still be running, and dropping
+            // a `Child` does not stop its process. A supervisor must not
+            // leave the runtime (and its `exec`-ed target) orphaned, so
+            // terminate and reap it best-effort before reporting the
+            // original failure.
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(error(source))
+        }
+    }
 }
 
 /// Follows the shell convention so the propagated code is the one a caller
@@ -133,6 +144,8 @@ fn exit_code_of(status: ExitStatus) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use test_case::test_case;
+
     use super::*;
     use crate::config::{CommandId, ContextId, ProviderId, SecretName, SecretSpec};
 
@@ -180,11 +193,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn propagates_a_normal_child_exit_code() {
+    // Several distinct codes so a stubbed `Ok(<constant>)` cannot pass.
+    #[test_case(0)]
+    #[test_case(3)]
+    #[test_case(42)]
+    #[test_case(255)]
+    fn propagates_a_normal_child_exit_code(code: u8) {
         let mut command = Command::new("sh");
-        command.args(["-c", "exit 7"]);
-        assert_eq!(supervise(command, "sh").unwrap(), 7);
+        command.args(["-c", &format!("exit {code}")]);
+        assert_eq!(supervise(command, "sh").unwrap(), code);
     }
 
     #[test]
@@ -222,5 +239,59 @@ mod tests {
         let command = Command::new("no-such-runtime-zz-iwaya");
         let error = supervise(command, "no-such-runtime-zz-iwaya").unwrap_err();
         assert_eq!(error.runtime, "no-such-runtime-zz-iwaya");
+    }
+
+    // Guards the injection contract on the supervision path specifically: a
+    // resolved value must overwrite a same-named variable already present in
+    // the invoking environment, not fall back to it. The env loop is
+    // duplicated from `exec_runtime`, so a divergence here would otherwise
+    // pass the exit-status and argument tests unnoticed.
+    #[test]
+    fn overwrites_an_inherited_variable_with_the_resolved_value() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("iwaya-supervise-env-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("value.txt");
+        let runtime = dir.join("fake-runtime");
+        let var = format!("IWAYA_TEST_VAR_{}", std::process::id());
+
+        // A fake runtime that ignores the Docker-shaped argv and records the
+        // one environment variable under test.
+        std::fs::write(
+            &runtime,
+            format!(
+                "#!/bin/sh\nprintf %s \"${var}\" > \"{}\"\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // SAFETY: single-threaded within this test; the variable name is
+        // unique per process, so it cannot race another test's environment.
+        unsafe { std::env::set_var(&var, "inherited-value") };
+
+        let context = DockerContext {
+            id: ContextId::new("c"),
+            runtime: runtime.to_str().unwrap().to_string(),
+            user: "u".to_string(),
+            workdir: "/w".to_string(),
+            container_name: "target".to_string(),
+        };
+        let policy = CommandPolicy {
+            id: CommandId::new("cmd"),
+            secrets: vec![],
+            proxy_secrets: vec![],
+        };
+        let environment = vec![(EnvName::new(&var), Secret::new("resolved-value".to_string()))];
+
+        assert_eq!(supervise_runtime(&context, &policy, environment, &[]).unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "resolved-value");
+
+        unsafe { std::env::remove_var(&var) };
+        let _ = std::fs::remove_file(&marker);
+        let _ = std::fs::remove_file(&runtime);
+        let _ = std::fs::remove_dir(&dir);
     }
 }
