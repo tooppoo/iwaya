@@ -63,15 +63,22 @@ pub fn exec_runtime(
     let argv = build_argv(context, policy, user_args);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
-    for (name, value) in &environment {
-        // `Command::env` overwrites a same-named variable inherited from the
-        // invoking environment, as the injection constraints require.
-        command.env(name.as_str(), value.expose_to_subprocess_env());
-    }
+    apply_injected_environment(&mut command, &environment);
     let source = command.exec();
     ExecError {
         runtime: context.runtime.clone(),
         source,
+    }
+}
+
+/// Registers each resolved value as an explicit environment entry on the
+/// command. `Command::env` overrides a same-named variable inherited from
+/// the invoking environment at spawn time, as the injection constraints
+/// require. Shared by both execution paths so the delivery contract cannot
+/// drift between them.
+fn apply_injected_environment(command: &mut Command, environment: &[(EnvName, Secret)]) {
+    for (name, value) in environment {
+        command.env(name.as_str(), value.expose_to_subprocess_env());
     }
 }
 
@@ -97,11 +104,7 @@ pub fn supervise_runtime(
     let argv = build_argv(context, policy, user_args);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
-    for (name, value) in &environment {
-        // Same injection contract as `exec_runtime`: overwrite any inherited
-        // same-named variable rather than inheriting it.
-        command.env(name.as_str(), value.expose_to_subprocess_env());
-    }
+    apply_injected_environment(&mut command, &environment);
     supervise(command, &context.runtime)
 }
 
@@ -241,57 +244,32 @@ mod tests {
         assert_eq!(error.runtime, "no-such-runtime-zz-iwaya");
     }
 
-    // Guards the injection contract on the supervision path specifically: a
-    // resolved value must overwrite a same-named variable already present in
-    // the invoking environment, not fall back to it. The env loop is
-    // duplicated from `exec_runtime`, so a divergence here would otherwise
-    // pass the exit-status and argument tests unnoticed.
+    // Guards the shared injection contract: every resolved value is
+    // registered as an explicit command environment entry, which
+    // `Command::env` applies over any inherited same-named variable at
+    // spawn. Inspecting the built command (rather than the process
+    // environment) keeps this free of the data race that mutating the global
+    // environment in a threaded test harness would introduce.
     #[test]
-    fn overwrites_an_inherited_variable_with_the_resolved_value() {
-        use std::os::unix::fs::PermissionsExt;
+    fn registers_each_resolved_value_as_an_overriding_env_entry() {
+        let mut command = Command::new("true");
+        let environment = vec![
+            (EnvName::new("TOKEN"), Secret::new("resolved".to_string())),
+            (EnvName::new("OTHER"), Secret::new("second".to_string())),
+        ];
 
-        let dir = std::env::temp_dir().join(format!("iwaya-supervise-env-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let marker = dir.join("value.txt");
-        let runtime = dir.join("fake-runtime");
-        let var = format!("IWAYA_TEST_VAR_{}", std::process::id());
+        apply_injected_environment(&mut command, &environment);
 
-        // A fake runtime that ignores the Docker-shaped argv and records the
-        // one environment variable under test.
-        std::fs::write(
-            &runtime,
-            format!(
-                "#!/bin/sh\nprintf %s \"${var}\" > \"{}\"\n",
-                marker.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // SAFETY: single-threaded within this test; the variable name is
-        // unique per process, so it cannot race another test's environment.
-        unsafe { std::env::set_var(&var, "inherited-value") };
-
-        let context = DockerContext {
-            id: ContextId::new("c"),
-            runtime: runtime.to_str().unwrap().to_string(),
-            user: "u".to_string(),
-            workdir: "/w".to_string(),
-            container_name: "target".to_string(),
-        };
-        let policy = CommandPolicy {
-            id: CommandId::new("cmd"),
-            secrets: vec![],
-            proxy_secrets: vec![],
-        };
-        let environment = vec![(EnvName::new(&var), Secret::new("resolved-value".to_string()))];
-
-        assert_eq!(supervise_runtime(&context, &policy, environment, &[]).unwrap(), 0);
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "resolved-value");
-
-        unsafe { std::env::remove_var(&var) };
-        let _ = std::fs::remove_file(&marker);
-        let _ = std::fs::remove_file(&runtime);
-        let _ = std::fs::remove_dir(&dir);
+        let injected: Vec<(String, Option<String>)> = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_str().unwrap().to_string(),
+                    value.map(|v| v.to_str().unwrap().to_string()),
+                )
+            })
+            .collect();
+        assert!(injected.contains(&("TOKEN".to_string(), Some("resolved".to_string()))));
+        assert!(injected.contains(&("OTHER".to_string(), Some("second".to_string()))));
     }
 }
