@@ -47,6 +47,11 @@ enum Cli {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// Run the credential-aware proxy, reading its secret transfer on stdin.
+    /// Hidden: this is the process the sidecar image runs, driven by the
+    /// supervisor, not a command a user invokes directly.
+    #[command(hide = true)]
+    Proxy,
 }
 
 // Debug is safe here: no variant carries a `Secret`, and `Secret` itself has
@@ -109,7 +114,13 @@ fn main() -> ExitCode {
         }
         error.exit()
     });
-    let Cli::Exec { context, command, args } = parsed;
+    match parsed {
+        Cli::Exec { context, command, args } => run_exec(context, command, args),
+        Cli::Proxy => run_proxy(),
+    }
+}
+
+fn run_exec(context: String, command: String, args: Vec<String>) -> ExitCode {
     let invocation = Invocation {
         context: ContextId::new(&context),
         command: CommandId::new(&command),
@@ -121,6 +132,23 @@ fn main() -> ExitCode {
     let failure = exec_and_never_return(invocation);
     eprintln!("iwaya: error: {}", failure.message());
     ExitCode::from(failure.exit_code())
+}
+
+/// Serves the credential-aware proxy until the process is terminated. The
+/// secret transfer arrives on stdin and the readiness line on stdout; the
+/// supervisor manages this process's lifetime, so `serve` returning at all
+/// means the listener stopped and there is nothing left to do.
+fn run_proxy() -> ExitCode {
+    match proxy::run_proxy_mode(std::io::stdin().lock(), std::io::stdout().lock()) {
+        Ok(proxy) => {
+            proxy.serve();
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("iwaya: error: {e}");
+            ExitCode::from(EXIT_EXECUTION)
+        }
+    }
 }
 
 struct Invocation {
@@ -213,8 +241,10 @@ mod tests {
     }
 
     fn parsed_exec(args: &[&str]) -> (String, String, Vec<String>) {
-        let Cli::Exec { context, command, args } = parse(args).unwrap();
-        (context, command, args)
+        match parse(args).unwrap() {
+            Cli::Exec { context, command, args } => (context, command, args),
+            Cli::Proxy => panic!("expected an exec invocation"),
+        }
     }
 
     #[test]

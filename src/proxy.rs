@@ -11,21 +11,17 @@
 //! redirect-selected origin.
 
 use std::fmt;
+use std::io::{Read, Write};
 use std::sync::Arc;
 use std::thread;
 
+use serde::Deserialize;
 use tiny_http::{Header, Response, Server, StatusCode};
 
 use crate::phantom::Phantom;
 use crate::secret::Secret;
 
-// The item-level allows in this module are temporary: the proxy execution
-// mode (issue #31) is built incrementally, and nothing outside the tests
-// consumes the proxy yet. They are per item so anything that stays unused
-// once that mode lands is still flagged.
-
 /// One `proxy-secret` entry, resolved and armed for one invocation.
-#[allow(dead_code)]
 pub struct ProxyRoute {
     pub header_name: String,
     pub template: String,
@@ -36,14 +32,12 @@ pub struct ProxyRoute {
 
 /// A loopback-only reverse proxy serving every `proxy-secret` of one
 /// invocation from a single ephemeral port.
-#[allow(dead_code)]
 pub struct ReverseProxy {
     server: Server,
     routes: Arc<Vec<ProxyRoute>>,
     agent: ureq::Agent,
 }
 
-#[allow(dead_code)]
 impl ReverseProxy {
     /// Binds `127.0.0.1:0`: loopback only, ephemeral port, never a
     /// host-published or wildcard address.
@@ -100,10 +94,105 @@ impl fmt::Display for BindError {
     }
 }
 
+/// The secret-transfer document the supervisor writes to the proxy process
+/// stdin, before the proxy reports readiness
+/// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md, "Secret
+/// transfer into the proxy container"). Each route carries the phantom to
+/// match and the raw value to inject; both arrive only here, never through
+/// argv, environment, or a file. The exact shape is a supervisor/proxy
+/// implementation detail, not user configuration.
+#[derive(Deserialize)]
+struct ProxyTransfer {
+    routes: Vec<RouteTransfer>,
+}
+
+// No `Debug`: a derived one would format `secret` and `phantom`, which must
+// not reach any diagnostic.
+#[derive(Deserialize)]
+struct RouteTransfer {
+    header_name: String,
+    template: String,
+    upstream: String,
+    phantom: String,
+    secret: String,
+}
+
+/// Runs iwaya as the credential-aware proxy: reads the secret-transfer
+/// document from `input`, binds the loopback listener, reports the selected
+/// port on `readiness`, and returns the bound proxy for the caller to
+/// `serve`. This is the process that runs inside the sidecar image; splitting
+/// the bind-and-report step from `serve` lets it be tested without a live
+/// stdin or a container.
+pub fn run_proxy_mode<R: Read, W: Write>(
+    mut input: R,
+    mut readiness: W,
+) -> Result<ReverseProxy, ProxyModeError> {
+    let mut raw = String::new();
+    input
+        .read_to_string(&mut raw)
+        .map_err(ProxyModeError::Read)?;
+    let routes = parse_transfer(&raw)?;
+    let proxy = ReverseProxy::bind_loopback(routes).map_err(ProxyModeError::Bind)?;
+    // Readiness carries only the chosen port — never a secret or a phantom,
+    // per the requirement that readiness output stay free of raw values.
+    writeln!(readiness, "{{\"port\":{}}}", proxy.port()).map_err(ProxyModeError::Readiness)?;
+    readiness.flush().map_err(ProxyModeError::Readiness)?;
+    Ok(proxy)
+}
+
+fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
+    let transfer: ProxyTransfer = serde_json::from_str(input).map_err(|error| {
+        // Only the position is kept: a serde message could otherwise echo
+        // input bytes, which include the raw secret.
+        ProxyModeError::Parse {
+            line: error.line(),
+            column: error.column(),
+        }
+    })?;
+    Ok(transfer
+        .routes
+        .into_iter()
+        .map(|route| ProxyRoute {
+            header_name: route.header_name,
+            template: route.template,
+            upstream: route.upstream,
+            phantom: Phantom::from_transferred(route.phantom),
+            raw_value: Secret::new(route.secret),
+        })
+        .collect())
+}
+
+/// A failure before the proxy could begin serving. None of its variants
+/// carries a transferred value: `Parse` keeps only the position, so a
+/// diagnostic can never surface a secret.
+#[derive(Debug)]
+pub enum ProxyModeError {
+    Read(std::io::Error),
+    Parse { line: usize, column: usize },
+    Bind(BindError),
+    Readiness(std::io::Error),
+}
+
+impl fmt::Display for ProxyModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProxyModeError::Read(source) => {
+                write!(f, "cannot read the proxy transfer from stdin: {source}")
+            }
+            ProxyModeError::Parse { line, column } => {
+                write!(f, "invalid proxy transfer document at line {line} column {column}")
+            }
+            ProxyModeError::Bind(source) => write!(f, "{source}"),
+            ProxyModeError::Readiness(source) => {
+                write!(f, "cannot report proxy readiness: {source}")
+            }
+        }
+    }
+}
+
 /// A request the proxy refuses without contacting any upstream. Bodies are
 /// fixed strings: a rejection must never echo request data, which could
 /// contain a credential attempt.
-#[allow(dead_code)]
 enum Rejection {
     /// The request itself cannot be forwarded: a non-origin-form target, an unusable method, a credential header presented more than once, or an outbound request that could not be constructed from it.
     BadRequest(&'static str),
@@ -119,7 +208,6 @@ enum Rejection {
     Upstream(ureq::Error),
 }
 
-#[allow(dead_code)]
 impl Rejection {
     fn status(&self) -> u16 {
         match self {
@@ -141,7 +229,6 @@ impl Rejection {
     }
 }
 
-#[allow(dead_code)]
 fn handle(mut request: tiny_http::Request, routes: &[ProxyRoute], agent: &ureq::Agent) {
     match forward(&mut request, routes, agent) {
         Ok(upstream) => respond_with_upstream(request, upstream),
@@ -158,7 +245,6 @@ fn handle(mut request: tiny_http::Request, routes: &[ProxyRoute], agent: &ureq::
     }
 }
 
-#[allow(dead_code)]
 fn forward(
     request: &mut tiny_http::Request,
     routes: &[ProxyRoute],
@@ -239,7 +325,6 @@ fn forward(
 /// match would let extra caller-chosen occurrences ride along on an
 /// authenticated request. Such a request is rejected as a bad request
 /// before any phantom comparison, so it never reaches an upstream.
-#[allow(dead_code)]
 fn select_route<'r>(
     routes: &'r [ProxyRoute],
     headers: &[(String, String)],
@@ -274,7 +359,6 @@ fn select_route<'r>(
 /// parsing (browsers, many CDN/edge stacks, Node) treats `\` as `/` for
 /// special schemes, so a layer behind the upstream could read a forwarded
 /// `/\host` path as the same scheme-relative authority `//host` denotes.
-#[allow(dead_code)]
 fn is_origin_form(target: &str) -> bool {
     target.starts_with('/') && !target.starts_with("//") && !target.starts_with("/\\")
 }
@@ -286,7 +370,6 @@ fn is_origin_form(target: &str) -> bool {
 /// Host and the framing headers are re-derived — Host from the configured upstream, framing from the actual body.
 /// Expect is withheld because the proxy runs the upstream body leg itself and must not promise the caller's 100-continue on the upstream's behalf.
 /// A header whose name is a configured credential header is withheld for every route, not only the route selected for this request: the selected route's credential is re-added downstream with the raw value, and withholding the rest stops a caller from placing its own value in another route's credential header name and having it forwarded verbatim.
-#[allow(dead_code)]
 fn forwards_request_header(name: &str, routes: &[ProxyRoute]) -> bool {
     if is_hop_by_hop(name) {
         return false;
@@ -299,7 +382,6 @@ fn forwards_request_header(name: &str, routes: &[ProxyRoute]) -> bool {
         .any(|route| route.header_name.eq_ignore_ascii_case(name))
 }
 
-#[allow(dead_code)]
 fn is_hop_by_hop(name: &str) -> bool {
     matches!(
         name,
@@ -314,7 +396,6 @@ fn is_hop_by_hop(name: &str) -> bool {
     )
 }
 
-#[allow(dead_code)]
 fn respond_with_upstream(request: tiny_http::Request, upstream: ureq::http::Response<ureq::Body>) {
     let status = upstream.status().as_u16();
     let mut headers = Vec::new();
@@ -702,5 +783,86 @@ mod tests {
     #[test_case("http://evil.example/", false ; "absolute form")]
     fn accepts_only_origin_form_targets(target: &str, accepted: bool) {
         assert_eq!(is_origin_form(target), accepted);
+    }
+
+    fn transfer_document(upstream_port: u16, phantom: &str) -> String {
+        format!(
+            r#"{{"routes":[{{"header_name":"x-api-key","template":"Bearer {{}}","upstream":"http://127.0.0.1:{upstream_port}","phantom":"{phantom}","secret":"raw-secret-value"}}]}}"#
+        )
+    }
+
+    fn transferred_route() -> ProxyRoute {
+        let mut routes = parse_transfer(&transfer_document(8080, "iwaya-phantom-abc")).unwrap();
+        if routes.len() != 1 {
+            panic!("expected exactly one route, got {}", routes.len());
+        }
+        routes.pop().unwrap()
+    }
+
+    #[test]
+    fn parses_the_forwarding_fields_of_a_transferred_route() {
+        let route = transferred_route();
+        assert_eq!(
+            (route.header_name.as_str(), route.template.as_str(), route.upstream.as_str()),
+            ("x-api-key", "Bearer {}", "http://127.0.0.1:8080")
+        );
+    }
+
+    #[test]
+    fn parses_the_credential_material_of_a_transferred_route() {
+        let route = transferred_route();
+        assert!(route.phantom.matches_presented("iwaya-phantom-abc"));
+        assert_eq!(route.raw_value.expose_to_upstream_header(), "raw-secret-value");
+    }
+
+    #[test]
+    fn rejects_a_malformed_transfer_document_without_echoing_it() {
+        // `ProxyRoute` has no `Debug` (it holds a secret), so the Ok side
+        // cannot be unwrapped; match instead.
+        let rendered = match parse_transfer(r#"{"routes": [ NOT JSON secret=hunter2 ]}"#) {
+            Ok(_) => panic!("expected a parse error"),
+            Err(error) => error.to_string(),
+        };
+        // The position is reported; the input bytes (which stand in for a
+        // real secret) never appear in the message.
+        assert!(rendered.contains("invalid proxy transfer document"), "{rendered}");
+        assert!(!rendered.contains("hunter2"), "{rendered}");
+    }
+
+    #[test]
+    fn run_proxy_mode_announces_only_the_bound_port_on_readiness() {
+        let mut readiness = Vec::new();
+        let proxy =
+            run_proxy_mode(transfer_document(8080, "iwaya-phantom-abc").as_bytes(), &mut readiness)
+                .unwrap();
+
+        // Exact equality is the leak check: any secret or phantom byte in the
+        // readiness line would break it.
+        let announced = String::from_utf8(readiness).unwrap();
+        assert_eq!(announced.trim(), format!("{{\"port\":{}}}", proxy.port()));
+    }
+
+    #[test]
+    fn run_proxy_mode_serves_the_transferred_routes() {
+        let upstream = Upstream::start(Behavior::Echo);
+        let phantom = Phantom::generate().unwrap();
+        let phantom_value = phantom.expose_to_target_env().to_string();
+        let document = transfer_document(upstream.port, &phantom_value);
+
+        let proxy = run_proxy_mode(document.as_bytes(), &mut std::io::sink()).unwrap();
+        let port = proxy.port();
+        thread::spawn(move || proxy.serve());
+
+        client()
+            .get(format!("http://127.0.0.1:{port}/v1/messages"))
+            .header("x-api-key", &phantom_value)
+            .call()
+            .unwrap();
+        let received = upstream.last();
+        assert_eq!(received.path, "/v1/messages");
+        assert!(received.headers.contains(&(
+            "x-api-key".to_string(),
+            "Bearer raw-secret-value".to_string()
+        )));
     }
 }

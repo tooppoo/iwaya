@@ -47,6 +47,14 @@ impl Phantom {
         Ok(Phantom(value))
     }
 
+    /// Reconstructs the phantom the supervisor minted, from the value it
+    /// transferred to the proxy process. The minting side calls
+    /// [`Phantom::generate`]; the proxy (matching) side calls this with the
+    /// same value so it can recognise the credential the target was given.
+    pub fn from_transferred(value: String) -> Phantom {
+        Phantom(value)
+    }
+
     /// The value injected into the target process environment under the
     /// `proxy-secret` environment variable name. This is the only accessor
     /// that hands out the phantom itself; validation goes through
