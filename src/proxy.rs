@@ -281,11 +281,11 @@ fn is_origin_form(target: &str) -> bool {
 
 /// Returns true when a caller's request header is passed through to the upstream, and false when the proxy must own it instead.
 ///
-/// The proxy owns, and therefore does not forward, the following headers.
+/// A header the proxy does not own is forwarded as-is; a header whose name the proxy owns is not.
 /// Hop-by-hop headers (RFC 9110 §7.6.1) belong to the client-proxy connection, not to the upstream request.
 /// Host and the framing headers are re-derived — Host from the configured upstream, framing from the actual body.
 /// Expect is withheld because the proxy runs the upstream body leg itself and must not promise the caller's 100-continue on the upstream's behalf.
-/// Every configured credential header is withheld too: the matched one is re-added with the raw value, and a non-matched one must not smuggle a caller-chosen value upstream in a credential position.
+/// A header whose name is a configured credential header is withheld for every route, not only the route selected for this request: the selected route's credential is re-added downstream with the raw value, and withholding the rest stops a caller from placing its own value in another route's credential header name and having it forwarded verbatim.
 #[allow(dead_code)]
 fn forwards_request_header(name: &str, routes: &[ProxyRoute]) -> bool {
     if is_hop_by_hop(name) {
