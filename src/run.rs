@@ -6,9 +6,26 @@ use std::fmt;
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus};
+use std::thread;
+
+use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+use signal_hook::iterator::Signals;
 
 use crate::config::{CommandPolicy, DockerContext, EnvName};
 use crate::secret::Secret;
+
+/// Signals a foreground process is normally expected to act on: an
+/// interactive Ctrl-C (`SIGINT`) or Ctrl-\ (`SIGQUIT`), a `docker stop` /
+/// service shutdown (`SIGTERM`), and a terminal hangup (`SIGHUP`).
+///
+/// The relay is load-bearing for a signal aimed at iwaya's pid — above all
+/// `SIGTERM` from `docker stop` or a service manager — which the kernel
+/// delivers to iwaya alone, never to the supervised child.
+/// The terminal-generated members (`SIGINT`/`SIGQUIT`/`SIGHUP`) already
+/// reach the child through the shared process group, so relaying them is a
+/// harmless second delivery, kept for when they are sent to iwaya's pid
+/// directly (`kill -INT <iwaya-pid>`) rather than typed at the terminal.
+const FORWARDED_SIGNALS: [i32; 4] = [SIGINT, SIGTERM, SIGHUP, SIGQUIT];
 
 /// The complete shape of what iwaya builds. An `--env` option exists only for
 /// an environment variable the selected policy declares, always as a bare
@@ -90,9 +107,7 @@ fn apply_injected_environment(command: &mut Command, environment: &[(EnvName, Se
 /// could not be started.
 ///
 /// The direct-`secret` path keeps using `exec_runtime`; this path exists for
-/// proxy-backed delivery, which is not yet wired into execution (issue #31),
-/// so signal forwarding from iwaya to the child is deliberately left to the
-/// unit that wires it in — it carries its own dependency decision.
+/// proxy-backed delivery, which is not yet wired into execution (issue #31).
 // Unread until the proxy execution mode wires it in (issue #31).
 #[allow(dead_code)]
 pub fn supervise_runtime(
@@ -109,17 +124,48 @@ pub fn supervise_runtime(
 }
 
 /// Spawns a prepared command with iwaya's own stdin/stdout/stderr (the
-/// default for a spawned child), waits for it, and reduces its status to an
-/// exit code. Split from `supervise_runtime` so the wait-and-propagate
-/// behavior is testable without constructing a Docker-shaped invocation.
+/// default for a spawned child), relays foreground signals to it, waits for
+/// it, and reduces its status to an exit code. Split from
+/// `supervise_runtime` so the wait-and-propagate behavior is testable
+/// without constructing a Docker-shaped invocation.
 #[allow(dead_code)]
 fn supervise(mut command: Command, runtime: &str) -> Result<u8, ExecError> {
     let error = |source| ExecError {
         runtime: runtime.to_string(),
         source,
     };
-    let mut child = command.spawn().map_err(error)?;
-    match child.wait() {
+    // Register the handlers before the child exists so a signal arriving
+    // during spawn is queued for relay rather than taking iwaya's default
+    // action (which for most of these is to terminate iwaya and orphan the
+    // child).
+    let mut signals = Signals::new(FORWARDED_SIGNALS).map_err(error)?;
+    let handle = signals.handle();
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(source) => {
+            handle.close();
+            return Err(error(source));
+        }
+    };
+
+    // Relay each caught signal to the child on a separate thread. The child
+    // manages its own descendants, so the signal goes to its pid alone, not
+    // to iwaya's process group (which would include iwaya itself).
+    let pid = child.id();
+    let relay = thread::spawn(move || {
+        for signal in &mut signals {
+            forward_signal(pid, signal);
+        }
+    });
+
+    let result = child.wait();
+    // Stop the relay: `handle.close()` ends the signal iterator, so the
+    // thread returns and can be joined.
+    handle.close();
+    let _ = relay.join();
+
+    match result {
         Ok(status) => Ok(exit_code_of(status)),
         Err(source) => {
             // `wait` failed but the child may still be running, and dropping
@@ -131,6 +177,18 @@ fn supervise(mut command: Command, runtime: &str) -> Result<u8, ExecError> {
             let _ = child.wait();
             Err(error(source))
         }
+    }
+}
+
+/// Sends one signal to a child process by pid. `libc::kill` is the only way
+/// to relay an arbitrary signal to another process; std offers none. Errors
+/// are ignored on purpose: the one that occurs in practice is the child
+/// having already exited (`ESRCH`), which needs no action.
+fn forward_signal(pid: u32, signal: i32) {
+    // SAFETY: `kill` is an async-signal-safe syscall with no memory effects;
+    // passing a pid and signal number cannot violate any Rust invariant.
+    unsafe {
+        libc::kill(pid as libc::pid_t, signal);
     }
 }
 
@@ -213,6 +271,26 @@ mod tests {
         // SIGTERM is 15, so the shell convention yields 143.
         command.args(["-c", "kill -TERM $$"]);
         assert_eq!(supervise(command, "sh").unwrap(), 143);
+    }
+
+    #[test]
+    fn forwards_the_foreground_signals() {
+        // The set a foreground process is expected to act on. Pinned so a
+        // later edit cannot silently drop one (e.g. SIGTERM, which delivers
+        // `docker stop`).
+        assert_eq!(FORWARDED_SIGNALS, [SIGINT, SIGTERM, SIGHUP, SIGQUIT]);
+    }
+
+    #[test]
+    fn forward_signal_delivers_to_the_child_process() {
+        // Signals the child directly (not this test process), so no handler
+        // is installed on the harness and the delivery path is exercised in
+        // isolation. `sleep` has no SIGTERM handler, so it dies from the
+        // signal and the status carries the signal number.
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        forward_signal(child.id(), SIGTERM);
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(SIGTERM));
     }
 
     #[test]
