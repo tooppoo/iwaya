@@ -5,7 +5,7 @@
 
 ## Context
 
-The direct `secret` path replaces iwaya with the runtime via `exec`, so the kernel delivers signals straight to the runtime and iwaya has nothing to forward. The proxy-backed path cannot do that: iwaya must stay alive to run the sidecar proxy, so it supervises the runtime as a child ([Add Proxy-Backed Secret Delivery](20260820T162206Z_proxy-backed-secret-delivery.md), "Process model"). A supervised child does not receive the terminal's signals directly — an interactive Ctrl-C, a `docker stop` (`SIGTERM`), or a terminal hangup reaches iwaya first. Without forwarding, Ctrl-C would kill iwaya and orphan the runtime, changing the externally observable behavior the direct path has today.
+The direct `secret` path replaces iwaya with the runtime via `exec`, so the kernel delivers signals straight to the runtime and iwaya has nothing to forward. The proxy-backed path cannot do that: iwaya must stay alive to run the sidecar proxy, so it supervises the runtime as a child ([Add Proxy-Backed Secret Delivery](20260820T162206Z_proxy-backed-secret-delivery.md), "Process model"). That child inherits iwaya's process group, so terminal-generated foreground signals — Ctrl-C (`SIGINT`), Ctrl-\ (`SIGQUIT`), and a hangup (`SIGHUP`) — already reach it directly through group delivery. What does not reach it is a signal sent to iwaya's pid specifically, above all `SIGTERM` from `docker stop`, a service manager, or `kill <iwaya-pid>`, which the kernel delivers only to iwaya. Without forwarding, such a stop request would terminate iwaya and orphan the runtime, changing the externally observable behavior the direct path — where `exec` puts the runtime in iwaya's place — has today.
 
 Rust's standard library offers no safe way to install a signal handler or to send a signal to another process, so implementing forwarding requires choosing how to reach the OS signal facilities. This needs an ADR because it adds a runtime dependency and settles whether iwaya writes its own `unsafe` async-signal-safe handler.
 
@@ -39,7 +39,7 @@ Registering the handler directly with `libc` would add only `libc` (already in t
 
 ### Positive Consequences
 
-- A supervised runtime receives Ctrl-C, `docker stop`, and hangups as if iwaya were not between it and the terminal, preserving the direct path's observable behavior.
+- A stop signal aimed at iwaya's pid (`docker stop`, a service manager, `kill`) reaches the runtime instead of silently orphaning it, preserving the direct path's observable behavior.
 - The `unsafe`, async-signal-safety-critical part of signal handling is delegated to a hardened library; iwaya's own `unsafe` is limited to a single `kill` call with no memory effects.
 
 ### Negative Consequences
@@ -51,3 +51,4 @@ Registering the handler directly with `libc` would add only `libc` (already in t
 
 - The forwarded set is fixed to the four foreground signals; signals such as `SIGWINCH` (terminal resize) are out of scope until a concrete need appears.
 - Forwarding targets the child pid, not a process group; if a future runtime needs group-wide delivery, that is a separate decision.
+- Because the child shares iwaya's process group, the terminal-generated members (`SIGINT`/`SIGQUIT`/`SIGHUP`) reach it both directly and again via the relay. The second delivery is benign: the target and `docker exec` treat a repeated `SIGINT`/`SIGTERM` idempotently, and a signal to an already-exited child is a no-op (`ESRCH`). Relaying them still matters for the pid-directed case (`kill -INT <iwaya-pid>`), where group delivery does not occur.

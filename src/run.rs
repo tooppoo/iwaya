@@ -16,10 +16,15 @@ use crate::secret::Secret;
 
 /// Signals a foreground process is normally expected to act on: an
 /// interactive Ctrl-C (`SIGINT`) or Ctrl-\ (`SIGQUIT`), a `docker stop` /
-/// service shutdown (`SIGTERM`), and a terminal hangup (`SIGHUP`). Because a
-/// supervised runtime is a child rather than a replacement of iwaya, these
-/// reach iwaya first and must be relayed so the target behaves as if it had
-/// received them directly.
+/// service shutdown (`SIGTERM`), and a terminal hangup (`SIGHUP`).
+///
+/// The relay is load-bearing for a signal aimed at iwaya's pid — above all
+/// `SIGTERM` from `docker stop` or a service manager — which the kernel
+/// delivers to iwaya alone, never to the supervised child.
+/// The terminal-generated members (`SIGINT`/`SIGQUIT`/`SIGHUP`) already
+/// reach the child through the shared process group, so relaying them is a
+/// harmless second delivery, kept for when they are sent to iwaya's pid
+/// directly (`kill -INT <iwaya-pid>`) rather than typed at the terminal.
 const FORWARDED_SIGNALS: [i32; 4] = [SIGINT, SIGTERM, SIGHUP, SIGQUIT];
 
 /// The complete shape of what iwaya builds. An `--env` option exists only for
