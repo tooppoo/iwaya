@@ -27,9 +27,6 @@ impl Secret {
     /// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md). The
     /// only permitted call site is the reverse proxy's header rewrite; the
     /// value must never reach the proxy's own diagnostics or responses.
-    // Unread until the proxy execution mode calls the reverse proxy
-    // (issue #31).
-    #[allow(dead_code)]
     pub fn expose_to_upstream_header(&self) -> &str {
         &self.0
     }
