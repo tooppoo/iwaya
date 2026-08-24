@@ -178,7 +178,11 @@ fn validate_proxy_secret(
 /// come from the request itself, so a value carrying its own path, query,
 /// userinfo, or fragment would be silently ignored — a configuration error
 /// rather than a merge rule.
-fn is_http_origin(upstream: &str) -> bool {
+///
+/// Shared with the proxy's transfer validation: the supervisor sends the
+/// proxy the same upstream it read from configuration, and both sides must
+/// agree on what an acceptable origin is.
+pub(crate) fn is_http_origin(upstream: &str) -> bool {
     let Some(authority) = upstream
         .strip_prefix("https://")
         .or_else(|| upstream.strip_prefix("http://"))

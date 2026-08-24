@@ -11,13 +11,14 @@
 //! redirect-selected origin.
 
 use std::fmt;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::Arc;
 use std::thread;
 
 use serde::Deserialize;
 use tiny_http::{Header, Response, Server, StatusCode};
 
+use crate::config::is_http_origin;
 use crate::phantom::Phantom;
 use crate::secret::Secret;
 
@@ -124,12 +125,15 @@ struct RouteTransfer {
 /// the bind-and-report step from `serve` lets it be tested without a live
 /// stdin or a container.
 pub fn run_proxy_mode<R: Read, W: Write>(
-    mut input: R,
+    input: R,
     mut readiness: W,
 ) -> Result<ReverseProxy, ProxyModeError> {
+    // The transfer document is one line, terminated by a newline or EOF.
+    // Reading stops at the newline: the supervisor may keep the pipe open
+    // for the proxy's lifetime, so readiness must not wait on EOF.
     let mut raw = String::new();
-    input
-        .read_to_string(&mut raw)
+    BufReader::new(input)
+        .read_line(&mut raw)
         .map_err(ProxyModeError::Read)?;
     let routes = parse_transfer(&raw)?;
     let proxy = ReverseProxy::bind_loopback(routes).map_err(ProxyModeError::Bind)?;
@@ -155,6 +159,19 @@ fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
     if transfer.routes.is_empty() {
         return Err(ProxyModeError::EmptyTransfer);
     }
+    // The supervisor forwards upstreams it read from validated configuration,
+    // so a non-origin upstream is a supervisor defect: refuse it before
+    // readiness instead of serving a proxy whose outbound URI construction
+    // fails on every request. The diagnostic carries the route's position,
+    // never the value — a corrupt transfer could have placed any transferred
+    // byte, including a raw secret, in the upstream field.
+    if let Some(index) = transfer
+        .routes
+        .iter()
+        .position(|route| !is_http_origin(&route.upstream))
+    {
+        return Err(ProxyModeError::InvalidUpstream { index });
+    }
     Ok(transfer
         .routes
         .into_iter()
@@ -176,6 +193,7 @@ pub enum ProxyModeError {
     Read(std::io::Error),
     Parse { line: usize, column: usize },
     EmptyTransfer,
+    InvalidUpstream { index: usize },
     Bind(BindError),
     Readiness(std::io::Error),
 }
@@ -191,6 +209,9 @@ impl fmt::Display for ProxyModeError {
             }
             ProxyModeError::EmptyTransfer => {
                 write!(f, "the proxy transfer document contains no routes")
+            }
+            ProxyModeError::InvalidUpstream { index } => {
+                write!(f, "route {index} of the proxy transfer document has an upstream that is not an http(s) origin")
             }
             ProxyModeError::Bind(source) => write!(f, "{source}"),
             ProxyModeError::Readiness(source) => {
@@ -796,8 +817,12 @@ mod tests {
     }
 
     fn transfer_document(upstream_port: u16, phantom: &str) -> String {
+        transfer_document_with_upstream(&format!("http://127.0.0.1:{upstream_port}"), phantom)
+    }
+
+    fn transfer_document_with_upstream(upstream: &str, phantom: &str) -> String {
         format!(
-            r#"{{"routes":[{{"header_name":"x-api-key","template":"Bearer {{}}","upstream":"http://127.0.0.1:{upstream_port}","phantom":"{phantom}","secret":"raw-secret-value"}}]}}"#
+            r#"{{"routes":[{{"header_name":"x-api-key","template":"Bearer {{}}","upstream":"{upstream}","phantom":"{phantom}","secret":"raw-secret-value"}}]}}"#
         )
     }
 
@@ -840,6 +865,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_transfer_route_with_a_non_origin_upstream() {
+        let document =
+            transfer_document_with_upstream("https://api.example/v1", "iwaya-phantom-abc");
+        let rendered = match parse_transfer(&document) {
+            Ok(_) => panic!("expected an invalid-upstream error"),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(
+            rendered,
+            "route 0 of the proxy transfer document has an upstream that is not an http(s) origin"
+        );
+    }
+
+    #[test]
     fn rejects_a_transfer_document_without_routes() {
         let rendered = match parse_transfer(r#"{"routes":[]}"#) {
             Ok(_) => panic!("expected an empty-transfer error"),
@@ -859,6 +898,16 @@ mod tests {
         // readiness line would break it.
         let announced = String::from_utf8(readiness).unwrap();
         assert_eq!(announced.trim(), format!("{{\"port\":{}}}", proxy.port()));
+    }
+
+    #[test]
+    fn run_proxy_mode_reaches_readiness_without_stdin_eof() {
+        // `repeat` never reaches EOF, so readiness must come from the
+        // newline framing alone — a supervisor holding the pipe open must
+        // not hang the proxy before it reports ready.
+        let document = format!("{}\n", transfer_document(8080, "iwaya-phantom-abc"));
+        let input = document.as_bytes().chain(std::io::repeat(b' '));
+        assert!(run_proxy_mode(input, &mut std::io::sink()).is_ok());
     }
 
     #[test]

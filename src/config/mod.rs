@@ -19,6 +19,7 @@ mod validate;
 mod tests;
 
 pub use context::DockerContext;
+pub(crate) use validate::is_http_origin;
 pub use policy::{CommandPolicy, ProxySecretSpec};
 pub use provider::{BwsProvider, Provider};
 // SecretSpec is consumed only by tests today, and the remaining spec types
