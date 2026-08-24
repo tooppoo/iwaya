@@ -22,11 +22,14 @@ use sha2::{Digest, Sha256};
 /// its `proxy` execution mode, not a separately distributed executable.
 const DOCKERFILE: &str = "FROM scratch\nCOPY rootfs/ /\nENTRYPOINT [\"/iwaya\", \"proxy\"]\n";
 
-/// One file of the image: where it lands in the image filesystem, and the
-/// host file it is copied and hashed from.
+/// One file of the image: where it lands in the image filesystem, the open
+/// handle it is hashed and copied from, and the path for diagnostics. The
+/// handle pins one inode, so the digest and the copied bytes cannot diverge
+/// even if the path is replaced mid-build.
 struct Material {
     destination: String,
-    source: PathBuf,
+    path: PathBuf,
+    file: fs::File,
 }
 
 /// Ensures a proxy image matching the running iwaya exists locally and
@@ -39,13 +42,13 @@ struct Material {
 // flagged if that wiring ends up not using it.
 #[allow(dead_code)]
 pub fn ensure_proxy_image(runtime: &str) -> Result<String, ProxyImageError> {
-    let material = build_material()?;
-    let tag = image_tag(&material)?;
+    let mut material = build_material()?;
+    let tag = image_tag(&mut material)?;
     if image_exists(runtime, &tag)? {
         return Ok(tag);
     }
     let context = TempContext::create()?;
-    write_build_context(&context.path, &material).map_err(ProxyImageError::Context)?;
+    write_build_context(&context.path, &mut material).map_err(ProxyImageError::Context)?;
     build_image(runtime, &tag, &context.path)?;
     Ok(tag)
 }
@@ -56,28 +59,42 @@ pub fn ensure_proxy_image(runtime: &str) -> Result<String, ProxyImageError> {
 /// objects are the dependency closure the dynamic linker actually resolved,
 /// so nothing has to predict what the binary needs.
 fn build_material() -> Result<Vec<Material>, ProxyImageError> {
-    let exe = std::env::current_exe()
+    let exe_path = std::env::current_exe()
         .and_then(fs::canonicalize)
         .map_err(ProxyImageError::Exe)?;
+    // The handle comes from `/proc/self/exe`, which names the inode this
+    // process is executing, not whatever the path holds now: a rebuild can
+    // replace the file on disk mid-run, and the sidecar must run the same
+    // binary as the supervisor that builds it.
+    let mut exe = fs::File::open("/proc/self/exe").map_err(ProxyImageError::Exe)?;
+    let interpreter = program_interpreter(&mut exe)?;
     let mut material = vec![Material {
         destination: "/iwaya".to_string(),
-        source: exe.clone(),
+        path: exe_path.clone(),
+        file: exe,
     }];
-    if let Some(interpreter) = program_interpreter(&exe)? {
-        material.push(Material {
-            destination: interpreter.clone(),
-            source: PathBuf::from(interpreter),
-        });
+    if let Some(interpreter) = interpreter {
+        material.push(open_material(interpreter)?);
     }
-    for object in loaded_shared_objects(&exe)? {
-        material.push(Material {
-            destination: object.clone(),
-            source: PathBuf::from(object),
-        });
+    for object in loaded_shared_objects(&exe_path)? {
+        material.push(open_material(object)?);
     }
     material.sort_by(|a, b| a.destination.cmp(&b.destination));
     material.dedup_by(|a, b| a.destination == b.destination);
     Ok(material)
+}
+
+/// Opens one image file whose destination equals its host path.
+fn open_material(path: String) -> Result<Material, ProxyImageError> {
+    let file = fs::File::open(&path).map_err(|source| ProxyImageError::Material {
+        path: PathBuf::from(&path),
+        source,
+    })?;
+    Ok(Material {
+        path: PathBuf::from(&path),
+        destination: path,
+        file,
+    })
 }
 
 /// Every file-backed `.so` mapping of this process except the binary itself,
@@ -88,7 +105,7 @@ fn loaded_shared_objects(exe: &Path) -> Result<Vec<String>, ProxyImageError> {
     let maps = fs::read_to_string("/proc/self/maps").map_err(ProxyImageError::Maps)?;
     let mut objects: Vec<String> = maps
         .lines()
-        .filter_map(|line| line.split_whitespace().nth(5))
+        .filter_map(mapped_pathname)
         .filter(|path| path.starts_with('/') && path.contains(".so"))
         .filter(|path| Path::new(path) != exe)
         .map(str::to_string)
@@ -98,15 +115,36 @@ fn loaded_shared_objects(exe: &Path) -> Result<Vec<String>, ProxyImageError> {
     Ok(objects)
 }
 
+/// The pathname field of one `/proc/self/maps` line, or `None` for an
+/// anonymous mapping. The field is everything after the first five, not a
+/// whitespace token: maps does not escape spaces, so splitting would
+/// silently truncate — and thereby drop — a library under a path containing
+/// one. The kernel's ` (deleted)` marker is stripped; the material open then
+/// fails loudly on such a path instead of the image quietly lacking a file.
+fn mapped_pathname(line: &str) -> Option<&str> {
+    let mut rest = line;
+    for _ in 0..5 {
+        let separator = rest.find(char::is_whitespace)?;
+        rest = rest[separator..].trim_start();
+    }
+    let pathname = rest.strip_suffix(" (deleted)").unwrap_or(rest);
+    (!pathname.is_empty()).then_some(pathname)
+}
+
 /// The `PT_INTERP` path of an ELF64 little-endian executable, or `None` for
 /// a static binary. The interpreter path is read from the binary rather than
 /// guessed, because the kernel resolves exactly this embedded path when the
-/// container starts `/iwaya`.
-fn program_interpreter(exe: &Path) -> Result<Option<String>, ProxyImageError> {
+/// container starts `/iwaya`. Malformed input is refused with an error, never
+/// an abort, so every arithmetic and allocation below is bounded first.
+fn program_interpreter(file: &mut fs::File) -> Result<Option<String>, ProxyImageError> {
     const PT_INTERP: u32 = 3;
-    let mut file = fs::File::open(exe).map_err(ProxyImageError::Exe)?;
+    // An interpreter path is a filesystem path; anything beyond this bound
+    // is a corrupt size field, not a long path.
+    const INTERPRETER_PATH_LIMIT: u64 = 4096;
     let mut header = [0u8; 64];
-    file.read_exact(&mut header).map_err(ProxyImageError::Exe)?;
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_exact(&mut header))
+        .map_err(ProxyImageError::Exe)?;
     if header[..4] != [0x7f, b'E', b'L', b'F'] || header[4] != 2 || header[5] != 1 {
         // Only the format this build of iwaya can itself be: ELF64 little
         // endian. Anything else means the material discovery does not
@@ -118,8 +156,12 @@ fn program_interpreter(exe: &Path) -> Result<Option<String>, ProxyImageError> {
     let ph_entry_size = u16::from_le_bytes(header[0x36..0x38].try_into().unwrap()) as u64;
     let ph_count = u16::from_le_bytes(header[0x38..0x3a].try_into().unwrap()) as u64;
     for index in 0..ph_count {
+        let entry_offset = index
+            .checked_mul(ph_entry_size)
+            .and_then(|table_offset| ph_offset.checked_add(table_offset))
+            .ok_or(ProxyImageError::UnsupportedExecutable)?;
         let mut entry = [0u8; 56];
-        file.seek(SeekFrom::Start(ph_offset + index * ph_entry_size))
+        file.seek(SeekFrom::Start(entry_offset))
             .and_then(|_| file.read_exact(&mut entry))
             .map_err(ProxyImageError::Exe)?;
         if u32::from_le_bytes(entry[0..4].try_into().unwrap()) != PT_INTERP {
@@ -127,6 +169,9 @@ fn program_interpreter(exe: &Path) -> Result<Option<String>, ProxyImageError> {
         }
         let offset = u64::from_le_bytes(entry[0x8..0x10].try_into().unwrap());
         let size = u64::from_le_bytes(entry[0x20..0x28].try_into().unwrap());
+        if size == 0 || size > INTERPRETER_PATH_LIMIT {
+            return Err(ProxyImageError::UnsupportedExecutable);
+        }
         let mut path = vec![0u8; size as usize];
         file.seek(SeekFrom::Start(offset))
             .and_then(|_| file.read_exact(&mut path))
@@ -145,35 +190,47 @@ fn program_interpreter(exe: &Path) -> Result<Option<String>, ProxyImageError> {
 /// file that goes into the image. A locally rebuilt binary changes the
 /// digest, so a stale image is never silently reused across builds that
 /// share a version number.
-fn image_tag(material: &[Material]) -> Result<String, ProxyImageError> {
+fn image_tag(material: &mut [Material]) -> Result<String, ProxyImageError> {
     let mut hasher = Sha256::new();
     hasher.update(DOCKERFILE.as_bytes());
-    for entry in material {
-        // The destination and a separator participate too: content moving
-        // to a different path must change the digest.
+    for entry in material.iter_mut() {
+        // Each field is length-prefixed so the material-to-bytes encoding is
+        // injective: without the prefixes, content containing a separator
+        // byte could collide with a different destination/content split.
+        hasher.update((entry.destination.len() as u64).to_le_bytes());
         hasher.update(entry.destination.as_bytes());
-        hasher.update([0]);
-        let mut file =
-            fs::File::open(&entry.source).map_err(|source| ProxyImageError::Material {
-                path: entry.source.clone(),
+        let length = entry
+            .file
+            .metadata()
+            .map(|metadata| metadata.len())
+            .map_err(|source| ProxyImageError::Material {
+                path: entry.path.clone(),
+                source,
+            })?;
+        hasher.update(length.to_le_bytes());
+        entry
+            .file
+            .seek(SeekFrom::Start(0))
+            .map_err(|source| ProxyImageError::Material {
+                path: entry.path.clone(),
                 source,
             })?;
         // Streamed in chunks: the binary is tens of megabytes and never
         // needs to be resident just to be hashed.
         let mut buffer = [0u8; 64 * 1024];
         loop {
-            let read = file.read(&mut buffer).map_err(|source| {
-                ProxyImageError::Material {
-                    path: entry.source.clone(),
+            let read = entry
+                .file
+                .read(&mut buffer)
+                .map_err(|source| ProxyImageError::Material {
+                    path: entry.path.clone(),
                     source,
-                }
-            })?;
+                })?;
             if read == 0 {
                 break;
             }
             hasher.update(&buffer[..read]);
         }
-        hasher.update([0]);
     }
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(12);
@@ -187,16 +244,21 @@ fn image_tag(material: &[Material]) -> Result<String, ProxyImageError> {
 /// its destination path. Copies are marked executable wholesale: the set is
 /// exactly one binary and shared objects, and the linker also maps those
 /// executable.
-fn write_build_context(directory: &Path, material: &[Material]) -> std::io::Result<()> {
+fn write_build_context(directory: &Path, material: &mut [Material]) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::write(directory.join("Dockerfile"), DOCKERFILE)?;
     let rootfs = directory.join("rootfs");
-    for entry in material {
+    for entry in material.iter_mut() {
         let destination = rootfs.join(entry.destination.trim_start_matches('/'));
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::copy(&entry.source, &destination)?;
+        // Copied from the already-open handle, not the path: the digest was
+        // computed from this handle's inode, and the copy must be the bytes
+        // the tag describes even if the path was replaced in between.
+        entry.file.seek(SeekFrom::Start(0))?;
+        let mut copy = fs::File::create(&destination)?;
+        std::io::copy(&mut entry.file, &mut copy)?;
         fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
@@ -363,11 +425,12 @@ mod tests {
     }
 
     fn material_fixture(dir: &Path) -> Vec<Material> {
-        let source = dir.join("payload");
-        fs::write(&source, b"payload-bytes").unwrap();
+        let path = dir.join("payload");
+        fs::write(&path, b"payload-bytes").unwrap();
         vec![Material {
             destination: "/iwaya".to_string(),
-            source,
+            file: fs::File::open(&path).unwrap(),
+            path,
         }]
     }
 
@@ -378,7 +441,7 @@ mod tests {
         assert!(
             material
                 .iter()
-                .any(|entry| entry.destination == "/iwaya" && entry.source == exe)
+                .any(|entry| entry.destination == "/iwaya" && entry.path == exe)
         );
     }
 
@@ -395,22 +458,62 @@ mod tests {
         assert!(
             objects
                 .iter()
-                .all(|entry| entry.source.as_path() == Path::new(&entry.destination))
+                .all(|entry| entry.path.as_path() == Path::new(&entry.destination))
         );
     }
 
     #[test]
     fn bundles_the_interpreter_the_binary_requests() {
-        let exe = fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
-        let interpreter = program_interpreter(&exe).unwrap().unwrap();
+        let mut exe = fs::File::open("/proc/self/exe").unwrap();
+        let interpreter = program_interpreter(&mut exe).unwrap().unwrap();
         let material = build_material().unwrap();
         assert!(material.iter().any(|entry| entry.destination == interpreter));
     }
 
     #[test]
+    fn keeps_a_mapped_pathname_containing_spaces_intact() {
+        let line = "7f00-7f01 r-xp 00000000 08:01 123    /opt/my libs/libfoo.so";
+        assert_eq!(mapped_pathname(line), Some("/opt/my libs/libfoo.so"));
+    }
+
+    #[test]
+    fn strips_the_deleted_marker_from_a_mapped_pathname() {
+        let line = "7f00-7f01 r-xp 00000000 08:01 123    /usr/lib/libbar.so (deleted)";
+        assert_eq!(mapped_pathname(line), Some("/usr/lib/libbar.so"));
+    }
+
+    #[test]
+    fn refuses_a_non_elf_executable() {
+        let dir = test_dir("non-elf");
+        let path = dir.join("not-elf");
+        fs::write(&path, [0u8; 64]).unwrap();
+        let mut file = fs::File::open(&path).unwrap();
+        assert!(matches!(
+            program_interpreter(&mut file),
+            Err(ProxyImageError::UnsupportedExecutable)
+        ));
+    }
+
+    #[test]
+    fn treats_an_executable_without_program_headers_as_static() {
+        let dir = test_dir("static-elf");
+        let path = dir.join("static");
+        // A minimal ELF64 little-endian header with zero program headers:
+        // the static-binary branch the recipe documents as "the binary
+        // ships alone".
+        let mut header = [0u8; 64];
+        header[..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        header[4] = 2;
+        header[5] = 1;
+        fs::write(&path, header).unwrap();
+        let mut file = fs::File::open(&path).unwrap();
+        assert!(program_interpreter(&mut file).unwrap().is_none());
+    }
+
+    #[test]
     fn tags_with_the_iwaya_version_and_a_12_hex_digest() {
         let dir = test_dir("tag-format");
-        let tag = image_tag(&material_fixture(&dir)).unwrap();
+        let tag = image_tag(&mut material_fixture(&dir)).unwrap();
         let suffix = tag
             .strip_prefix(&format!("iwaya-proxy:v{}-", env!("CARGO_PKG_VERSION")))
             .expect("the tag starts with the versioned prefix");
@@ -420,23 +523,28 @@ mod tests {
     #[test]
     fn tags_the_same_material_identically() {
         let dir = test_dir("tag-same");
-        let material = material_fixture(&dir);
-        assert_eq!(image_tag(&material).unwrap(), image_tag(&material).unwrap());
+        let mut material = material_fixture(&dir);
+        assert_eq!(
+            image_tag(&mut material).unwrap(),
+            image_tag(&mut material).unwrap()
+        );
     }
 
     #[test]
     fn tags_changed_material_differently() {
         let dir = test_dir("tag-changed");
-        let material = material_fixture(&dir);
-        let before = image_tag(&material).unwrap();
-        fs::write(&material[0].source, b"rebuilt-bytes").unwrap();
-        assert_ne!(before, image_tag(&material).unwrap());
+        let mut material = material_fixture(&dir);
+        let before = image_tag(&mut material).unwrap();
+        // Same inode as the held handle: `fs::write` truncates in place, so
+        // this models a rebuilt file, not a replaced one.
+        fs::write(&material[0].path, b"rebuilt-bytes").unwrap();
+        assert_ne!(before, image_tag(&mut material).unwrap());
     }
 
     #[test]
     fn writes_the_embedded_dockerfile_into_the_context() {
         let dir = test_dir("context-dockerfile");
-        write_build_context(&dir, &material_fixture(&dir)).unwrap();
+        write_build_context(&dir, &mut material_fixture(&dir)).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join("Dockerfile")).unwrap(),
             DOCKERFILE
@@ -446,7 +554,7 @@ mod tests {
     #[test]
     fn copies_material_under_rootfs_at_its_destination_path() {
         let dir = test_dir("context-copy");
-        write_build_context(&dir, &material_fixture(&dir)).unwrap();
+        write_build_context(&dir, &mut material_fixture(&dir)).unwrap();
         assert_eq!(
             fs::read(dir.join("rootfs/iwaya")).unwrap(),
             b"payload-bytes"
@@ -456,7 +564,7 @@ mod tests {
     #[test]
     fn marks_copied_material_executable() {
         let dir = test_dir("context-mode");
-        write_build_context(&dir, &material_fixture(&dir)).unwrap();
+        write_build_context(&dir, &mut material_fixture(&dir)).unwrap();
         let mode = fs::metadata(dir.join("rootfs/iwaya"))
             .unwrap()
             .permissions()
