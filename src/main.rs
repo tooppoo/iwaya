@@ -16,6 +16,7 @@ mod bws;
 mod config;
 mod phantom;
 mod proxy;
+mod proxy_image;
 mod run;
 mod secret;
 
