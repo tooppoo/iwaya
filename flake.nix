@@ -31,15 +31,6 @@
 
             cargoLock.lockFile = ./Cargo.lock;
 
-            nativeBuildInputs = [
-              pkgs.makeWrapper
-            ];
-
-            postInstall = ''
-              wrapProgram "$out/bin/iwaya" \
-                --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.bws ]}
-            '';
-
             meta = {
               description = "Command proxy for controlled secret injection";
               license = pkgs.lib.licenses.asl20;
