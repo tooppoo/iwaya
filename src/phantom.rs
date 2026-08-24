@@ -23,17 +23,16 @@ const PREFIX: &str = "iwaya-phantom-";
 /// `Debug`/`Display`, so a phantom cannot ride along in formatted
 /// diagnostics; unlike a `Secret`, its value is deliberately delivered to
 /// the target process environment.
-// The item-level allows below are temporary: the proxy execution path
-// (issue #31) is built incrementally, and nothing consumes a phantom yet.
-// They are per item, not module-wide, so an item that stays unused once
-// the proxy path lands is still flagged.
-#[allow(dead_code)]
 pub struct Phantom(String);
 
-#[allow(dead_code)]
 impl Phantom {
     /// Draws fresh OS entropy, so every call — across `proxy-secret`
     /// entries and across invocations — yields an unrelated value.
+    // Temporary: the minting side belongs to the supervisor wiring
+    // (issue #42), which has not landed; only the proxy-side consumers
+    // are live. Per item, not impl-wide, so anything still unused once
+    // that wiring lands is flagged again.
+    #[allow(dead_code)]
     pub fn generate() -> Result<Phantom, GenerateError> {
         let mut bytes = [0u8; ENTROPY_BYTES];
         getrandom::fill(&mut bytes).map_err(|source| GenerateError { source })?;
@@ -59,6 +58,9 @@ impl Phantom {
     /// `proxy-secret` environment variable name. This is the only accessor
     /// that hands out the phantom itself; validation goes through
     /// [`Phantom::matches_presented`] instead.
+    // Temporary until the supervisor wiring (issue #42) injects the value
+    // into the target environment; see `generate`.
+    #[allow(dead_code)]
     pub fn expose_to_target_env(&self) -> &str {
         &self.0
     }

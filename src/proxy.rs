@@ -149,6 +149,12 @@ fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
             column: error.column(),
         }
     })?;
+    // The supervisor starts proxy mode only when at least one `proxy-secret`
+    // exists, so an empty transfer is a supervisor defect. Refusing before
+    // readiness surfaces it at startup instead of as per-request rejections.
+    if transfer.routes.is_empty() {
+        return Err(ProxyModeError::EmptyTransfer);
+    }
     Ok(transfer
         .routes
         .into_iter()
@@ -169,6 +175,7 @@ fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
 pub enum ProxyModeError {
     Read(std::io::Error),
     Parse { line: usize, column: usize },
+    EmptyTransfer,
     Bind(BindError),
     Readiness(std::io::Error),
 }
@@ -181,6 +188,9 @@ impl fmt::Display for ProxyModeError {
             }
             ProxyModeError::Parse { line, column } => {
                 write!(f, "invalid proxy transfer document at line {line} column {column}")
+            }
+            ProxyModeError::EmptyTransfer => {
+                write!(f, "the proxy transfer document contains no routes")
             }
             ProxyModeError::Bind(source) => write!(f, "{source}"),
             ProxyModeError::Readiness(source) => {
@@ -827,6 +837,15 @@ mod tests {
         // real secret) never appear in the message.
         assert!(rendered.contains("invalid proxy transfer document"), "{rendered}");
         assert!(!rendered.contains("hunter2"), "{rendered}");
+    }
+
+    #[test]
+    fn rejects_a_transfer_document_without_routes() {
+        let rendered = match parse_transfer(r#"{"routes":[]}"#) {
+            Ok(_) => panic!("expected an empty-transfer error"),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(rendered, "the proxy transfer document contains no routes");
     }
 
     #[test]
