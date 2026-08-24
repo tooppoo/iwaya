@@ -14,6 +14,7 @@ Accepted:
 * [Add Proxy-Backed Secret Delivery with Phantom Credentials](20260820T162206Z_proxy-backed-secret-delivery.md) — the `proxy-secret` delivery mode: why the raw value stays out of the target container, and the phantom-credential, sidecar-proxy, and embedded-image decisions behind it.
 * [Use a Blocking HTTP Stack (tiny_http + ureq) for the Reverse Proxy](20260822T162745Z_blocking-http-stack-for-proxy.md) — why the credential-aware reverse proxy uses a blocking, thread-per-connection stack instead of adopting an async runtime.
 * [Forward Signals to the Supervised Runtime with signal-hook](20260823T064329Z_signal-forwarding-with-signal-hook.md) — why supervised proxy-backed execution relays foreground signals via signal-hook rather than a hand-rolled handler or an async runtime.
+* [Assemble the Proxy Image from the Running Binary and Its Loaded Objects](20260824T132429Z_proxy-image-from-running-binary.md) — how the `FROM scratch` sidecar image obtains a working `/iwaya` without a base image, toolchain, or network, and why its identity digest covers the build material.
 * [Treat iwaya as a Mitigation Boundary, Not a Sandbox](20260710T170955Z_mitigation-boundary-not-sandbox.md) — why iwaya must not be described as a sandbox, and what that costs.
 * [Implement iwaya in Rust](20260808T171732Z_implement-iwaya-in-rust.md) — the implementation language.
 
