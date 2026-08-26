@@ -9,7 +9,7 @@
 
 use std::fmt;
 use std::fmt::Write as _;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 
 use serde::Deserialize;
@@ -30,6 +30,10 @@ pub struct Sidecar {
 struct Readiness {
     port: u16,
 }
+
+/// Far above any `{"port":N}` line, far below anything worth buffering from
+/// an image the supervisor must not trust.
+const READINESS_LIMIT: u64 = 256;
 
 impl Sidecar {
     /// Starts the sidecar from `image`, delivers `transfer` on its stdin,
@@ -86,29 +90,33 @@ impl Sidecar {
                 .and_then(|_| stdin.write_all(b"\n"))
         };
         let stdout = child.stdout.take().expect("stdout was requested as piped");
+        // From here `sidecar` is alive on every failure return, so its
+        // `Drop` removes the container the failure leaves behind.
         let mut sidecar = Sidecar {
             runtime: runtime.to_string(),
             container_name,
             port: 0,
             child,
         };
-        // From here every failure goes through `abandon`, so the container
-        // the failure leaves behind is removed before the error returns.
         if let Err(source) = delivery {
-            return Err(sidecar.abandon(SidecarError::Transfer(source)));
+            return Err(SidecarError::Transfer(source));
         }
+        // The read is capped: readiness bytes come from the image, and a
+        // defective one streaming a newline-less flood must exhaust this
+        // limit — landing on the unusable-readiness rejection — rather than
+        // the supervisor's memory.
         let mut readiness = String::new();
-        match BufReader::new(stdout).read_line(&mut readiness) {
-            Ok(0) => return Err(sidecar.abandon(SidecarError::ExitedBeforeReady)),
+        match BufReader::new(stdout.take(READINESS_LIMIT)).read_line(&mut readiness) {
+            Ok(0) => return Err(SidecarError::ExitedBeforeReady),
             Ok(_) => {}
-            Err(source) => return Err(sidecar.abandon(SidecarError::Readiness(source))),
+            Err(source) => return Err(SidecarError::Readiness(source)),
         }
         let parsed: Readiness = match serde_json::from_str(readiness.trim_end()) {
             Ok(parsed) => parsed,
             // The line is not echoed: readiness carries only the port by
             // contract, but a defective image could print anything, and a
             // diagnostic must not gamble on what.
-            Err(_) => return Err(sidecar.abandon(SidecarError::UnusableReadiness)),
+            Err(_) => return Err(SidecarError::UnusableReadiness),
         };
         sidecar.port = parsed.port;
         Ok(sidecar)
@@ -120,13 +128,6 @@ impl Sidecar {
     #[allow(dead_code)]
     pub fn port(&self) -> u16 {
         self.port
-    }
-
-    /// Tears down and hands the startup failure back, so the error path
-    /// leaves no container behind.
-    fn abandon(&mut self, error: SidecarError) -> SidecarError {
-        self.teardown();
-        error
     }
 
     /// Removes the container and reaps the runtime client. `rm --force` is
@@ -350,6 +351,21 @@ mod tests {
         let rendered = start_error(&runtime, "{}");
         assert!(rendered.contains("unusable readiness"), "{rendered}");
         assert!(!rendered.contains("leaked-readiness-bytes"), "{rendered}");
+    }
+
+    #[test]
+    fn rejects_a_newline_less_readiness_flood_at_the_limit() {
+        let dir = test_dir("flood");
+        let log = dir.join("log");
+        // 4 KiB without a newline: read_line must stop at READINESS_LIMIT
+        // and reject, not buffer until the stream ends.
+        let runtime = fake_runtime(
+            &dir,
+            &log,
+            r#"read line; head -c 4096 /dev/zero | tr '\0' 'x'"#,
+        );
+        let rendered = start_error(&runtime, "{}");
+        assert!(rendered.contains("unusable readiness"), "{rendered}");
     }
 
     #[test]
