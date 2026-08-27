@@ -19,6 +19,7 @@ mod proxy;
 mod proxy_image;
 mod run;
 mod secret;
+mod sidecar;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
