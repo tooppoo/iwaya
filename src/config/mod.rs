@@ -22,10 +22,10 @@ pub use context::DockerContext;
 pub(crate) use validate::is_http_origin;
 pub use policy::{CommandPolicy, ProxySecretSpec};
 pub use provider::{BwsProvider, Provider};
-// SecretSpec is consumed only by tests today, and the remaining spec types
-// are not yet named outside their defining modules; they stay re-exported so
-// the configuration types remain one flat namespace for the rest of the
-// crate.
+// SecretSpec and InjectHeader are named only by tests today, and
+// ExecAcquisition is not yet named outside its defining module; they stay
+// re-exported so the configuration types remain one flat namespace for the
+// rest of the crate.
 #[allow(unused_imports)]
 pub use policy::{InjectHeader, SecretSpec};
 #[allow(unused_imports)]

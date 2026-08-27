@@ -28,11 +28,6 @@ pub struct Phantom(String);
 impl Phantom {
     /// Draws fresh OS entropy, so every call — across `proxy-secret`
     /// entries and across invocations — yields an unrelated value.
-    // Temporary: the minting side belongs to the supervisor wiring
-    // (issue #42), which has not landed; only the proxy-side consumers
-    // are live. Per item, not impl-wide, so anything still unused once
-    // that wiring lands is flagged again.
-    #[allow(dead_code)]
     pub fn generate() -> Result<Phantom, GenerateError> {
         let mut bytes = [0u8; ENTROPY_BYTES];
         getrandom::fill(&mut bytes).map_err(|source| GenerateError { source })?;
@@ -55,13 +50,17 @@ impl Phantom {
     }
 
     /// The value injected into the target process environment under the
-    /// `proxy-secret` environment variable name. This is the only accessor
-    /// that hands out the phantom itself; validation goes through
+    /// `proxy-secret` environment variable name. Validation goes through
     /// [`Phantom::matches_presented`] instead.
-    // Temporary until the supervisor wiring (issue #42) injects the value
-    // into the target environment; see `generate`.
-    #[allow(dead_code)]
     pub fn expose_to_target_env(&self) -> &str {
+        &self.0
+    }
+
+    /// The value as it travels in the supervisor-to-proxy transfer
+    /// document, where the proxy's [`Phantom::from_transferred`]
+    /// reconstructs it. The transfer and the target environment are the
+    /// only places a phantom leaves this type.
+    pub fn expose_to_transfer(&self) -> &str {
         &self.0
     }
 

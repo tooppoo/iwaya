@@ -15,12 +15,12 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::Arc;
 use std::thread;
 
-use serde::Deserialize;
 use tiny_http::{Header, Response, Server, StatusCode};
 
 use crate::config::is_http_origin;
 use crate::phantom::Phantom;
 use crate::secret::Secret;
+use crate::transfer::ProxyTransfer;
 
 /// One `proxy-secret` entry, resolved and armed for one invocation.
 pub struct ProxyRoute {
@@ -95,29 +95,6 @@ impl fmt::Display for BindError {
     }
 }
 
-/// The secret-transfer document the supervisor writes to the proxy process
-/// stdin, before the proxy reports readiness
-/// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md, "Secret
-/// transfer into the proxy container"). Each route carries the phantom to
-/// match and the raw value to inject; both arrive only here, never through
-/// argv, environment, or a file. The exact shape is a supervisor/proxy
-/// implementation detail, not user configuration.
-#[derive(Deserialize)]
-struct ProxyTransfer {
-    routes: Vec<RouteTransfer>,
-}
-
-// No `Debug`: a derived one would format `secret` and `phantom`, which must
-// not reach any diagnostic.
-#[derive(Deserialize)]
-struct RouteTransfer {
-    header_name: String,
-    template: String,
-    upstream: String,
-    phantom: String,
-    secret: String,
-}
-
 /// Runs iwaya as the credential-aware proxy: reads the secret-transfer
 /// document from `input`, binds the loopback listener, reports the selected
 /// port on `readiness`, and returns the bound proxy for the caller to
@@ -144,7 +121,9 @@ pub fn run_proxy_mode<R: Read, W: Write>(
     Ok(proxy)
 }
 
-fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
+// `pub(crate)` for the supervisor-side round-trip tests: the serializer in
+// `transfer` must produce exactly what this parser accepts.
+pub(crate) fn parse_transfer(input: &str) -> Result<Vec<ProxyRoute>, ProxyModeError> {
     let transfer: ProxyTransfer = serde_json::from_str(input).map_err(|error| {
         // Only the position is kept: a serde message could otherwise echo
         // input bytes, which include the raw secret.
