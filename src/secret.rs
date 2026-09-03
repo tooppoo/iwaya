@@ -30,4 +30,13 @@ impl Secret {
     pub fn expose_to_upstream_header(&self) -> &str {
         &self.0
     }
+
+    /// Reads the raw value for the supervisor-to-proxy transfer document
+    /// (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md, "Secret
+    /// transfer into the proxy container"). The only permitted call site is
+    /// the transfer serialization; the document travels over the sidecar's
+    /// stdin and must never reach argv, environment, files, or diagnostics.
+    pub fn expose_to_proxy_transfer(&self) -> &str {
+        &self.0
+    }
 }

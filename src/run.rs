@@ -46,6 +46,16 @@ pub fn build_argv(
         argv.push("--env".to_string());
         argv.push(secret.env_name.to_string());
     }
+    // A proxy-backed secret injects two variables, neither carrying a raw
+    // value: the phantom under the credential name, and the loopback proxy
+    // URL under `base-url-env` (docs/design/configuration.md,
+    // "Proxy-Backed Secret Delivery").
+    for proxy_secret in &policy.proxy_secrets {
+        argv.push("--env".to_string());
+        argv.push(proxy_secret.env_name.to_string());
+        argv.push("--env".to_string());
+        argv.push(proxy_secret.base_url_env.to_string());
+    }
     argv.push("--user".to_string());
     argv.push(context.user.clone());
     argv.push("--workdir".to_string());
@@ -208,7 +218,9 @@ mod tests {
     use test_case::test_case;
 
     use super::*;
-    use crate::config::{CommandId, ContextId, ProviderId, SecretName, SecretSpec};
+    use crate::config::{
+        CommandId, ContextId, InjectHeader, ProviderId, ProxySecretSpec, SecretName, SecretSpec,
+    };
 
     // The documented construction walk-through for
     // `iwaya exec --context iwaya claude -- --resume` against the baseline
@@ -252,6 +264,44 @@ mod tests {
                 "--resume",
             ]
         );
+    }
+
+    // Without this test, a proxy-backed policy could reach the runtime with
+    // neither of its two variables listed, and the container would silently
+    // not receive the phantom or the proxy URL.
+    #[test]
+    fn lists_both_proxy_secret_env_names_in_the_argv() {
+        let context = DockerContext {
+            id: ContextId::new("iwaya"),
+            runtime: "docker".to_string(),
+            user: "vscode".to_string(),
+            workdir: "/w".to_string(),
+            container_name: "app".to_string(),
+        };
+        let policy = CommandPolicy {
+            id: CommandId::new("claude"),
+            secrets: vec![],
+            proxy_secrets: vec![ProxySecretSpec {
+                env_name: EnvName::new("ANTHROPIC_AUTH_TOKEN"),
+                provider: ProviderId::new("bws-default"),
+                secret_name: SecretName::new("ANTHROPIC_AUTH_TOKEN"),
+                upstream: "https://api.anthropic.com".to_string(),
+                base_url_env: EnvName::new("ANTHROPIC_BASE_URL"),
+                inject_header: InjectHeader {
+                    name: "x-api-key".to_string(),
+                    template: "{}".to_string(),
+                },
+            }],
+        };
+
+        let argv = build_argv(&context, &policy, &[]);
+
+        let env_names: Vec<&str> = argv
+            .windows(2)
+            .filter(|pair| pair[0] == "--env")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        assert_eq!(env_names, ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]);
     }
 
     // Several distinct codes so a stubbed `Ok(<constant>)` cannot pass.

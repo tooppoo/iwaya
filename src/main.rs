@@ -20,6 +20,7 @@ mod proxy_image;
 mod run;
 mod secret;
 mod sidecar;
+mod transfer;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
