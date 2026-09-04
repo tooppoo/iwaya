@@ -176,7 +176,7 @@ Each of the following violations is a configuration error:
 * An `inject-header` name that is a header the proxy itself controls: `Host`, `Content-Length`, `Transfer-Encoding`, or `Connection`.
 * A collision among the environment variable names one policy injects — the first argument of every `secret`, the first argument of every `proxy-secret`, and every `base-url-env` value share a single uniqueness scope. A collision is never an ordering rule or a last-write-wins choice.
 
-An iwaya build that does not yet include the proxy execution path rejects an invocation whose selected policy declares a `proxy-secret`, so a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
+A policy declaring a `proxy-secret` executes only through the sidecar-supervised proxy path ([the proxy-backed delivery ADR](../adr/20260820T162206Z_proxy-backed-secret-delivery.md)): the target receives the phantom credential and the proxy URL, never the raw value, and a `proxy-secret` never silently degrades into direct delivery or into a command running without its declared credential.
 
 ### Baseline Example
 

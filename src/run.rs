@@ -216,7 +216,6 @@ fn forward_signal(pid: u32, signal: i32) {
 /// Follows the shell convention so the propagated code is the one a caller
 /// already expects: a normal exit yields its own code, and a signal-killed
 /// child yields 128 + the signal number.
-#[allow(dead_code)]
 fn exit_code_of(status: ExitStatus) -> u8 {
     match status.code() {
         Some(code) => code as u8,

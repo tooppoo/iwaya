@@ -90,7 +90,6 @@ impl Phantom {
 /// The OS entropy source failed; without it no phantom is trustworthy, so
 /// the invocation must not proceed to proxy-backed delivery.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct GenerateError {
     source: getrandom::Error,
 }
