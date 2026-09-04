@@ -273,6 +273,12 @@ fn execute(invocation: Invocation) -> Result<u8, Failure> {
             Err(e) => return Err(Failure::Provision(e)),
         }
     }
+    // The resolver map holds its own copies of every raw value; provisioning
+    // took what the proxy path needs, so those copies are surplus from here
+    // and must not sit in memory across the whole supervision. The copies
+    // inside `provisioned` remain until the end of the invocation; shrinking
+    // that lifetime to the transfer serialization is issue #49.
+    drop(resolved);
     let image = match proxy_image::ensure_proxy_image(&context.runtime) {
         Ok(image) => image,
         Err(e) => return Err(Failure::ProxyImage(e)),
