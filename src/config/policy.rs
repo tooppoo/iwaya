@@ -27,9 +27,6 @@ pub struct SecretSpec {
 pub struct ProxySecretSpec {
     pub env_name: EnvName,
     pub provider: ProviderId,
-    // Unread until the proxy execution path resolves proxy-backed secrets
-    // (issue #31).
-    #[allow(dead_code)]
     pub secret_name: SecretName,
     pub upstream: String,
     pub base_url_env: EnvName,
