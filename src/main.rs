@@ -64,22 +64,26 @@ enum Failure {
     Config(config::ConfigError),
     UnknownContext(ContextId),
     UnknownCommand(CommandId),
-    // Temporary while proxy-secret delivery is built incrementally (issue
-    // #31): the configuration contract is in place before the execution
-    // path. Shares the configuration exit code because the corrective
-    // action is configuration-side.
-    ProxySecretUnsupported(CommandId),
     Resolution(bws::ResolveError),
+    Provision(phantom::GenerateError),
+    ProxyImage(proxy_image::ProxyImageError),
+    Sidecar(sidecar::SidecarError),
     Execution(run::ExecError),
 }
 
 impl Failure {
     fn exit_code(&self) -> u8 {
         match self {
-            Failure::Config(_) | Failure::ProxySecretUnsupported(_) => EXIT_CONFIG,
+            Failure::Config(_) => EXIT_CONFIG,
             Failure::UnknownContext(_) | Failure::UnknownCommand(_) => EXIT_UNKNOWN_SELECTION,
             Failure::Resolution(_) => EXIT_RESOLUTION,
-            Failure::Execution(_) => EXIT_EXECUTION,
+            // Provisioning, image preparation, and sidecar startup are
+            // stages of constructing the execution, so they share its
+            // provisional category.
+            Failure::Provision(_)
+            | Failure::ProxyImage(_)
+            | Failure::Sidecar(_)
+            | Failure::Execution(_) => EXIT_EXECUTION,
         }
     }
 
@@ -92,12 +96,16 @@ impl Failure {
             Failure::UnknownCommand(id) => {
                 format!("unknown command '{id}': no configured command policy has this identifier")
             }
-            Failure::ProxySecretUnsupported(id) => {
-                format!(
-                    "command '{id}' declares 'proxy-secret', which this version of iwaya does not execute yet; nothing was executed"
-                )
-            }
             Failure::Resolution(e) => format!("secret resolution failed, nothing was executed: {e}"),
+            Failure::Provision(e) => {
+                format!("proxy-secret provisioning failed, nothing was executed: {e}")
+            }
+            Failure::ProxyImage(e) => {
+                format!("proxy image preparation failed, nothing was executed: {e}")
+            }
+            Failure::Sidecar(e) => {
+                format!("proxy sidecar startup failed, nothing was executed: {e}")
+            }
             Failure::Execution(e) => e.to_string(),
         }
     }
@@ -130,11 +138,16 @@ fn run_exec(context: String, command: String, args: Vec<String>) -> ExitCode {
         args,
     };
 
-    // `exec_and_never_return` replaces this process on success, so reaching
-    // a return value at all means a failure to report.
-    let failure = exec_and_never_return(invocation);
-    eprintln!("iwaya: error: {}", failure.message());
-    ExitCode::from(failure.exit_code())
+    // A direct-`secret` execution replaces this process, so `Ok` can only
+    // come from a supervised proxy-backed execution, carrying the exit code
+    // the target produced.
+    match execute(invocation) {
+        Ok(code) => ExitCode::from(code),
+        Err(failure) => {
+            eprintln!("iwaya: error: {}", failure.message());
+            ExitCode::from(failure.exit_code())
+        }
+    }
 }
 
 /// Serves the credential-aware proxy until the process is terminated. The
@@ -173,34 +186,38 @@ fn config_path() -> PathBuf {
     config_home.join("iwaya").join("config.kdl")
 }
 
-fn exec_and_never_return(invocation: Invocation) -> Failure {
+fn execute(invocation: Invocation) -> Result<u8, Failure> {
     let configuration = match config::load(&config_path()) {
         Ok(configuration) => configuration,
-        Err(e) => return Failure::Config(e),
+        Err(e) => return Err(Failure::Config(e)),
     };
 
     let Some(context) = configuration.context(&invocation.context) else {
-        return Failure::UnknownContext(invocation.context);
+        return Err(Failure::UnknownContext(invocation.context));
     };
     let Some(policy) = configuration.policy(&invocation.command) else {
-        return Failure::UnknownCommand(invocation.command);
+        return Err(Failure::UnknownCommand(invocation.command));
     };
 
-    // Running the command anyway would break the guarantee that the declared
-    // injection mapping is complete: the process would start without the
-    // credential its policy promises.
-    if !policy.proxy_secrets.is_empty() {
-        return Failure::ProxySecretUnsupported(invocation.command);
-    }
-
-    // Every declared secret resolves before anything executes, and only
-    // declared secrets are resolved. One failure aborts the invocation: a
-    // partially populated environment is never handed to the container.
+    // Every declared secret — direct and proxy-backed — resolves before
+    // anything executes, and only declared secrets are resolved. One failure
+    // aborts the invocation: a partially populated environment is never
+    // handed to the container.
     let mut names_by_provider: Vec<(&config::ProviderId, Vec<&SecretName>)> = Vec::new();
-    for secret in &policy.secrets {
-        match names_by_provider.iter_mut().find(|(id, _)| *id == &secret.provider) {
-            Some((_, names)) => names.push(&secret.secret_name),
-            None => names_by_provider.push((&secret.provider, vec![&secret.secret_name])),
+    let declared = policy
+        .secrets
+        .iter()
+        .map(|secret| (&secret.provider, &secret.secret_name))
+        .chain(
+            policy
+                .proxy_secrets
+                .iter()
+                .map(|secret| (&secret.provider, &secret.secret_name)),
+        );
+    for (provider, name) in declared {
+        match names_by_provider.iter_mut().find(|(id, _)| *id == provider) {
+            Some((_, names)) => names.push(name),
+            None => names_by_provider.push((provider, vec![name])),
         }
     }
 
@@ -215,24 +232,78 @@ fn exec_and_never_return(invocation: Invocation) -> Failure {
             Ok(values) => {
                 resolved.insert(provider_id, values);
             }
-            Err(e) => return Failure::Resolution(e),
+            Err(e) => return Err(Failure::Resolution(e)),
         }
     }
+
+    let resolved_value = |provider: &config::ProviderId, name: &SecretName| {
+        resolved
+            .get(provider)
+            .and_then(|values| values.get(name))
+            .cloned()
+            .expect("every declared secret was resolved")
+    };
 
     let environment = policy
         .secrets
         .iter()
-        .map(|spec| {
-            let value = resolved
-                .get(&spec.provider)
-                .and_then(|values| values.get(&spec.secret_name))
-                .cloned()
-                .expect("every declared secret was resolved");
-            (spec.env_name.clone(), value)
-        })
+        .map(|spec| (spec.env_name.clone(), resolved_value(&spec.provider, &spec.secret_name)))
         .collect();
 
-    Failure::Execution(run::exec_runtime(context, policy, environment, &invocation.args))
+    if policy.proxy_secrets.is_empty() {
+        // `exec_runtime` replaces this process on success, so reaching the
+        // return at all means a failure to report.
+        return Err(Failure::Execution(run::exec_runtime(
+            context,
+            policy,
+            environment,
+            &invocation.args,
+        )));
+    }
+
+    // The proxy-backed order is fixed: provision, prepare the image, start
+    // the sidecar, and only then start the target — the target must never
+    // run before the proxy is ready
+    // (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md).
+    let mut provisioned = Vec::with_capacity(policy.proxy_secrets.len());
+    for spec in &policy.proxy_secrets {
+        let raw_value = resolved_value(&spec.provider, &spec.secret_name);
+        match transfer::ProvisionedProxySecret::provision(spec, raw_value) {
+            Ok(secret) => provisioned.push(secret),
+            Err(e) => return Err(Failure::Provision(e)),
+        }
+    }
+    // The resolver map holds its own copies of every raw value; provisioning
+    // took what the proxy path needs, so those copies are surplus from here
+    // and must not sit in memory across the whole supervision. The copies
+    // inside `provisioned` remain until the end of the invocation; shrinking
+    // that lifetime to the transfer serialization is issue #49.
+    drop(resolved);
+    let image = match proxy_image::ensure_proxy_image(&context.runtime) {
+        Ok(image) => image,
+        Err(e) => return Err(Failure::ProxyImage(e)),
+    };
+    let sidecar = match sidecar::Sidecar::start(
+        &context.runtime,
+        &image,
+        &context.container_name,
+        &transfer::transfer_line(&provisioned),
+    ) {
+        Ok(sidecar) => sidecar,
+        Err(e) => return Err(Failure::Sidecar(e)),
+    };
+    let proxy_environment = transfer::target_environment(&provisioned, sidecar.port());
+    // `sidecar` stays alive across the supervision and drops afterward on
+    // every path, so the container is removed exactly when the invocation —
+    // successful or not — is over.
+    run::supervise_runtime(
+        context,
+        policy,
+        environment,
+        &proxy_environment,
+        &invocation.args,
+    )
+    .map_err(Failure::Execution)
 }
 
 #[cfg(test)]

@@ -45,10 +45,6 @@ impl Sidecar {
     /// `transfer` must be a single line without the trailing newline; the
     /// serialized JSON transfer document satisfies this because JSON string
     /// escapes keep raw newlines out of the serialization.
-    // Unwired until the exec path composes image, sidecar, and supervision
-    // (issue #42); this allow and the one on `port` are the module's only
-    // roots, so anything they stop reaching stays flagged.
-    #[allow(dead_code)]
     pub fn start(
         runtime: &str,
         image: &str,
@@ -124,8 +120,6 @@ impl Sidecar {
 
     /// The loopback port the proxy listens on, valid inside the target
     /// container's network namespace.
-    // Unwired until issue #42's exec path; see `start`.
-    #[allow(dead_code)]
     pub fn port(&self) -> u16 {
         self.port
     }

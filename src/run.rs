@@ -116,21 +116,33 @@ fn apply_injected_environment(command: &mut Command, environment: &[(EnvName, Se
 /// model"). Returns the exit code to propagate, or an error if the runtime
 /// could not be started.
 ///
-/// The direct-`secret` path keeps using `exec_runtime`; this path exists for
-/// proxy-backed delivery, which is not yet wired into execution (issue #31).
-// Unread until the proxy execution mode wires it in (issue #31).
-#[allow(dead_code)]
+/// The direct-`secret` path keeps using `exec_runtime`. `proxy_environment`
+/// carries the proxy-backed entries — the phantom and the loopback proxy
+/// URL — which are deliberately plain strings, not `Secret`s: both are meant
+/// to reach the target process.
 pub fn supervise_runtime(
     context: &DockerContext,
     policy: &CommandPolicy,
     environment: Vec<(EnvName, Secret)>,
+    proxy_environment: &[(EnvName, String)],
     user_args: &[String],
 ) -> Result<u8, ExecError> {
     let argv = build_argv(context, policy, user_args);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
     apply_injected_environment(&mut command, &environment);
+    apply_proxy_environment(&mut command, proxy_environment);
     supervise(command, &context.runtime)
+}
+
+/// Registers the proxy-backed entries with the same override semantics as
+/// [`apply_injected_environment`]; separate because these values are plain
+/// strings by design, and folding them into the `Secret` path would wrap
+/// values that must not carry the secret type's handling restrictions.
+fn apply_proxy_environment(command: &mut Command, environment: &[(EnvName, String)]) {
+    for (name, value) in environment {
+        command.env(name.as_str(), value);
+    }
 }
 
 /// Spawns a prepared command with iwaya's own stdin/stdout/stderr (the
@@ -138,7 +150,6 @@ pub fn supervise_runtime(
 /// it, and reduces its status to an exit code. Split from
 /// `supervise_runtime` so the wait-and-propagate behavior is testable
 /// without constructing a Docker-shaped invocation.
-#[allow(dead_code)]
 fn supervise(mut command: Command, runtime: &str) -> Result<u8, ExecError> {
     let error = |source| ExecError {
         runtime: runtime.to_string(),
@@ -205,7 +216,6 @@ fn forward_signal(pid: u32, signal: i32) {
 /// Follows the shell convention so the propagated code is the one a caller
 /// already expects: a normal exit yields its own code, and a signal-killed
 /// child yields 128 + the signal number.
-#[allow(dead_code)]
 fn exit_code_of(status: ExitStatus) -> u8 {
     match status.code() {
         Some(code) => code as u8,
@@ -399,5 +409,33 @@ mod tests {
             .collect();
         assert!(injected.contains(&("TOKEN".to_string(), Some("resolved".to_string()))));
         assert!(injected.contains(&("OTHER".to_string(), Some("second".to_string()))));
+    }
+
+    #[test]
+    fn registers_each_proxy_entry_as_an_overriding_env_entry() {
+        let mut command = Command::new("true");
+        let environment = vec![
+            (EnvName::new("TOKEN"), "iwaya-phantom-abc".to_string()),
+            (EnvName::new("TOKEN_BASE_URL"), "http://127.0.0.1:1".to_string()),
+        ];
+
+        apply_proxy_environment(&mut command, &environment);
+
+        let injected: Vec<(String, Option<String>)> = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_str().unwrap().to_string(),
+                    value.map(|v| v.to_str().unwrap().to_string()),
+                )
+            })
+            .collect();
+        assert!(injected.contains(&("TOKEN".to_string(), Some("iwaya-phantom-abc".to_string()))));
+        assert!(
+            injected.contains(&(
+                "TOKEN_BASE_URL".to_string(),
+                Some("http://127.0.0.1:1".to_string())
+            ))
+        );
     }
 }

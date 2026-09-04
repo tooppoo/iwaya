@@ -54,10 +54,6 @@ impl ProvisionedProxySecret {
     /// Binds a resolved raw value to its spec under a phantom minted here:
     /// one call per `proxy-secret` per invocation is what yields the
     /// one-phantom-per-secret-per-invocation property.
-    // Unwired until the exec path provisions proxy secrets (issue #42); with
-    // `transfer_line` and `target_environment` these are the module's
-    // allowed roots.
-    #[allow(dead_code)]
     pub fn provision(spec: &ProxySecretSpec, raw_value: Secret) -> Result<ProvisionedProxySecret, GenerateError> {
         Ok(ProvisionedProxySecret {
             env_name: spec.env_name.clone(),
@@ -75,8 +71,6 @@ impl ProvisionedProxySecret {
 /// line: JSON string escaping keeps every raw newline out of the
 /// serialization, which the sidecar's single-line delivery contract relies
 /// on.
-// Unwired until issue #42's exec path; see `ProvisionedProxySecret::provision`.
-#[allow(dead_code)]
 pub fn transfer_line(provisioned: &[ProvisionedProxySecret]) -> String {
     let document = ProxyTransfer {
         routes: provisioned
@@ -98,8 +92,6 @@ pub fn transfer_line(provisioned: &[ProvisionedProxySecret]) -> String {
 /// secrets: the phantom under each credential name, and the loopback proxy
 /// URL under each `base-url-env`. Raw values never appear here — this is
 /// the entire proxy-secret surface the target sees.
-// Unwired until issue #42's exec path; see `ProvisionedProxySecret::provision`.
-#[allow(dead_code)]
 pub fn target_environment(provisioned: &[ProvisionedProxySecret], port: u16) -> Vec<(EnvName, String)> {
     let mut environment = Vec::with_capacity(provisioned.len() * 2);
     for secret in provisioned {

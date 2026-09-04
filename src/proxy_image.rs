@@ -37,10 +37,6 @@ struct Material {
 /// the image is built from a temporary context assembled out of the running
 /// binary and its loaded objects. The context lives under the system temp
 /// directory only for the duration of the build.
-// Unwired until the supervisor starts the sidecar (issue #42); this allow is
-// the single root for the module, so everything only it reaches stays
-// flagged if that wiring ends up not using it.
-#[allow(dead_code)]
 pub fn ensure_proxy_image(runtime: &str) -> Result<String, ProxyImageError> {
     let mut material = build_material()?;
     let tag = image_tag(&mut material)?;
