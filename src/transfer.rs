@@ -1,7 +1,7 @@
 //! The supervisor side of the secret-transfer contract: provisioning each
 //! `proxy-secret` with a fresh phantom, serializing the transfer document
 //! the sidecar reads on stdin — which consumes the raw values, leaving the
-//! supervisor none — and planning the environment the target process
+//! supervisor with none — and planning the environment the target process
 //! receives instead of them.
 //!
 //! The wire structs live here and are shared with the proxy-side parser
