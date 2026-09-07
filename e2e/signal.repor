@@ -1,0 +1,67 @@
+# A signal sent to the supervising iwaya's pid reaches the supervised target:
+# the kernel delivers a pid-directed SIGTERM (a 'docker stop', a service
+# manager, 'kill <iwaya-pid>') to iwaya alone, and only the relay makes it
+# reach the runtime child
+# (docs/adr/20260823T064329Z_signal-forwarding-with-signal-hook.md). The fake
+# runtime's 'exec' blocks in a plain 'sleep', so the observed exit 143
+# (128+SIGTERM) can only come from the forwarded signal terminating the
+# target, propagated back through the supervisor.
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "echo" "fake-access-token" }
+        }
+      }
+      contexts {
+        docker "ctx" {
+          runtime "fake-docker"
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "proxied" {
+          proxy-secret "TOKEN" {
+            provider "b"
+            secret-name "TOKEN"
+            upstream "https://api.example"
+            base-url-env "TOKEN_BASE_URL"
+            inject-header "x-api-key" "{}"
+          }
+        }
+      }
+    }
+    ```
+  write <"bws"> ```
+    #!/bin/sh
+    case "$1 $2" in
+      "project list") echo '[{"id":"pid1","name":"p"}]' ;;
+      "secret list")  echo '[{"key":"TOKEN","value":"raw-secret-value"}]' ;;
+      *) exit 1 ;;
+    esac
+    ```
+  write <"fake-docker"> ```
+    #!/bin/sh
+    case "$1" in
+      image) exit 0 ;;
+      run)   IFS= read -r line
+             echo '{"port":45678}' ;;
+      rm)    exit 0 ;;
+      exec)  : > exec-started
+             exec sleep 30 ;;
+    esac
+    ```
+}
+
+case "forwards a pid-directed SIGTERM to the supervised target" {
+  $ chmod +x fake-docker bws
+  $ PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx proxied & pid=$!; i=0; while [ ! -f exec-started ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -TERM "$pid"; wait "$pid"
+  assert {
+    exit 143
+  }
+}

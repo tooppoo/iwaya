@@ -1,0 +1,78 @@
+# Supervised proxy-backed execution keeps the interactive stdio contract of
+# the direct path: the target reads the invoker's stdin and writes to the
+# invoker's stdout and stderr with no intermediary
+# (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md, "Process
+# model"). The fake runtime's 'exec' echoes what it read from stdin and
+# writes a stderr marker, so each stream's passthrough is observed
+# separately.
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "echo" "fake-access-token" }
+        }
+      }
+      contexts {
+        docker "ctx" {
+          runtime "fake-docker"
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "proxied" {
+          proxy-secret "TOKEN" {
+            provider "b"
+            secret-name "TOKEN"
+            upstream "https://api.example"
+            base-url-env "TOKEN_BASE_URL"
+            inject-header "x-api-key" "{}"
+          }
+        }
+      }
+    }
+    ```
+  write <"bws"> ```
+    #!/bin/sh
+    case "$1 $2" in
+      "project list") echo '[{"id":"pid1","name":"p"}]' ;;
+      "secret list")  echo '[{"key":"TOKEN","value":"raw-secret-value"}]' ;;
+      *) exit 1 ;;
+    esac
+    ```
+  write <"fake-docker"> ```
+    #!/bin/sh
+    case "$1" in
+      image) exit 0 ;;
+      run)   IFS= read -r line
+             echo '{"port":45678}' ;;
+      rm)    exit 0 ;;
+      exec)  IFS= read -r line
+             printf 'target-stdout: %s\n' "$line"
+             printf 'target-stderr-marker\n' >&2
+             exit 0 ;;
+    esac
+    ```
+}
+
+case "passes the invoker stdin through to the supervised target" {
+  $ chmod +x fake-docker bws
+  $ printf 'hello-from-stdin\n' | PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx proxied
+  assert {
+    exit 0
+    stdout contains "target-stdout: hello-from-stdin"
+  }
+}
+
+case "passes the supervised target stderr through to the invoker" {
+  $ chmod +x fake-docker bws
+  $ printf 'x\n' | PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx proxied
+  assert {
+    exit 0
+    stderr contains "target-stderr-marker"
+  }
+}
