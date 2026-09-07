@@ -3,9 +3,10 @@
 # manager, 'kill <iwaya-pid>') to iwaya alone, and only the relay makes it
 # reach the runtime child
 # (docs/adr/20260823T064329Z_signal-forwarding-with-signal-hook.md). The fake
-# runtime's 'exec' blocks in a plain 'sleep', so the observed exit 143
-# (128+SIGTERM) can only come from the forwarded signal terminating the
-# target, propagated back through the supervisor.
+# runtime's 'exec' traps TERM and exits with the sentinel 43, which nothing
+# else can produce: a missing relay lets the unforwarded signal kill iwaya
+# itself (143), and a swallowed signal lets the target run to completion (0),
+# so both regressions fail the assertion instead of passing it vacuously.
 
 before_each {
   write <"config.kdl"> ```
@@ -52,16 +53,22 @@ before_each {
       run)   IFS= read -r line
              echo '{"port":45678}' ;;
       rm)    exit 0 ;;
-      exec)  : > exec-started
-             exec sleep 30 ;;
+      exec)  trap 'kill "$sleeper" 2>/dev/null; exit 43' TERM
+             sleep 15 & sleeper=$!
+             : > exec-started
+             wait "$sleeper" ;;
     esac
     ```
 }
 
+# The marker appears only after the trap is installed, so the kill cannot
+# race ahead of the handler. The wait loop assumes a fractional-second
+# 'sleep' (coreutils/busybox); it bounds the marker wait to ~10 seconds so a
+# never-starting target fails the case instead of hanging it.
 case "forwards a pid-directed SIGTERM to the supervised target" {
   $ chmod +x fake-docker bws
   $ PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx proxied & pid=$!; i=0; while [ ! -f exec-started ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -TERM "$pid"; wait "$pid"
   assert {
-    exit 143
+    exit 43
   }
 }
