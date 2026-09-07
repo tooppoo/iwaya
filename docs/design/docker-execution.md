@@ -124,11 +124,11 @@ runtime
 
 `--interactive` and `--tty` are always present.
 
-An `--env` option must be generated only for an environment variable that the selected command policy declares. No other option may be generated from configuration, and no arbitrary runtime option is passed through, so the argv above is the complete shape of what iwaya builds.
+An `--env` option must be generated only for an environment variable that the selected command policy declares. For a `proxy-secret`, that is two variables: its credential name and its `base-url-env`. No other option may be generated from configuration, and no arbitrary runtime option is passed through, so the argv above is the complete shape of the runtime exec argv iwaya builds. A proxy-backed invocation additionally constructs the proxy image and sidecar invocations, whose shape and constraints belong to [Proxy-Backed Delivery](security-model.md#proxy-backed-delivery) and the paragraph under [Execution Order](#execution-order).
 
 ## Environment Injection Constraints
 
-The resolved values are set in the environment of the runtime process that iwaya starts on the host. The container receives them because each name is forwarded with `--env NAME`.
+Under direct delivery, the resolved values are set in the environment of the runtime process that iwaya starts on the host. The container receives them because each name is forwarded with `--env NAME`. A `proxy-secret`'s declared names receive the phantom credential and the loopback proxy URL through the same path and under the same constraints below; its resolved raw value never enters this environment.
 
 This section constrains the environment of that runtime process. A provider credential, such as the BWS access token, follows a separate path into the environment of a different subprocess; see [BWS Secret Resolution](configuration.md#bws-secret-resolution) and [Provider Credentials](security-model.md#provider-credentials).
 
