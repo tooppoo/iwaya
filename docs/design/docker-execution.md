@@ -56,6 +56,8 @@ flowchart TD
 
 The order is a requirement, not an optimization.
 
+For a policy that declares a `proxy-secret`, the construct step additionally mints the phantom credentials, prepares the proxy image, and starts the proxy sidecar, and the execute step supervises the runtime as a child instead of replacing iwaya with it. The guarantee is unchanged: nothing executes before every declared secret has resolved, and the target additionally does not start before the sidecar has reported readiness. The security consequences are defined in [Proxy-Backed Delivery](security-model.md#proxy-backed-delivery).
+
 ### Validation Precedes Secret Resolution
 
 Validation must cover at least:
@@ -154,7 +156,7 @@ Failure causes must be distinguishable from one another. A configuration that do
 
 When the runtime command runs, iwaya passes stdin, stdout, and stderr through to it, exits with its exit status, and forwards signals to it as far as the platform and the container runtime allow.
 
-Apart from secret injection and the forced `--interactive` and `--tty` behavior, a caller should observe no difference from invoking the runtime directly.
+Apart from secret injection and the forced `--interactive` and `--tty` behavior, a caller should observe no difference from invoking the runtime directly. This holds for both delivery modes: direct delivery replaces the iwaya process with the runtime, while proxy-backed delivery keeps iwaya alive as a supervisor beside the sidecar, and the supervisor preserves the same stdio, exit-status, and signal contract.
 
 ## Architectural Invariants
 
@@ -165,7 +167,7 @@ Apart from secret injection and the forced `--interactive` and `--tty` behavior,
 5. An invocation cannot introduce a provider, a secret, or an environment mapping.
 6. Validation completes before any secret is resolved.
 7. Every declared secret resolves before the runtime command is executed, and only declared secrets are resolved.
-8. Raw secret values never enter the runtime argv, and exist only in the environment of the runtime process and inside the container. Where else they must not be written is defined by [the security model](security-model.md#secret-lifecycle).
+8. Raw secret values never enter any argv iwaya builds. A directly delivered value exists only in the environment of the runtime process and inside the container; a proxy-backed value never enters either, and exists only in the supervisor and the proxy sidecar as defined by [Proxy-Backed Delivery](security-model.md#proxy-backed-delivery). Where else raw values must not be written is defined by [the security model](security-model.md#secret-lifecycle).
 9. An `--env` option exists only for an environment variable declared by the selected command policy.
 10. A policy-managed environment variable is never satisfied by the invoking environment, whether by inheritance or by fallback.
 11. iwaya is not represented as a sandbox.

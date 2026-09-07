@@ -4,7 +4,9 @@ This document defines the security boundary iwaya claims, the exposure it is des
 
 Read this before relying on iwaya to protect a credential, and before describing iwaya's guarantees in documentation, diagnostics, or issue discussion.
 
-The durable decisions behind this boundary are recorded in [Treat iwaya as a Mitigation Boundary, Not a Sandbox](../adr/20260710T170955Z_mitigation-boundary-not-sandbox.md) and [Define iwaya as a Docker-Context Secret Injection Runner](../adr/20260806T192918Z_docker-context-secret-injection-runner.md).
+The durable decisions behind this boundary are recorded in [Treat iwaya as a Mitigation Boundary, Not a Sandbox](../adr/20260710T170955Z_mitigation-boundary-not-sandbox.md), [Define iwaya as a Docker-Context Secret Injection Runner](../adr/20260806T192918Z_docker-context-secret-injection-runner.md), and [Add Proxy-Backed Secret Delivery with Phantom Credentials](../adr/20260820T162206Z_proxy-backed-secret-delivery.md).
+
+iwaya has two delivery modes with different guarantees: direct delivery (`secret`), in which the target process receives the raw value, and proxy-backed delivery (`proxy-secret`), in which it never does. Everything in this document applies to both modes unless a section says otherwise; the difference is defined in [Proxy-Backed Delivery](#proxy-backed-delivery).
 
 ## Mitigation Boundary, Not a Sandbox
 
@@ -22,6 +24,7 @@ iwaya is designed to reduce the following forms of credential exposure:
 - session-wide secret exposure, in which every process inherits a credential from the environment
 - unnecessary secret delivery to commands that do not require the credential
 - manual credential selection errors, such as using a broadly scoped token where a narrow one would suffice
+- for proxy-backed delivery only: extraction and persistence of the raw credential by the target command, which receives a phantom in its place
 
 ## What iwaya Does Not Protect Against
 
@@ -29,7 +32,11 @@ iwaya provides no protection against the following.
 
 **A command that misuses a secret it was configured to receive.** After injection, the process may print, log, persist, or transmit the value. A command policy fixes delivery; it does not constrain use.
 
-**Every process that inherits the secret.** A resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them.
+**Every process that inherits the secret.** Under direct delivery, a resolved value passes through the environment of the container runtime process iwaya starts on the host, reaches the process inside the container, and is inherited by that process's descendants under ordinary operating-system and container-runtime rules. iwaya intercepts none of them. Under proxy-backed delivery, the same inheritance applies to the phantom credential instead of the raw value.
+
+**Misuse of the upstream API through the proxy.** Proxy-backed delivery keeps the raw value out of the target, not the credential's authority. While the invocation runs, the target holds a valid phantom and can make the proxy send any request to the configured upstream on its behalf. Proxy-backed delivery mitigates credential extraction and persistence, not what the upstream API is used for.
+
+**A target container with authority over the container runtime.** A container that can reach the Docker or Podman control socket, or otherwise command the runtime, can inspect or manipulate the proxy sidecar and every other container. Such a container is outside every boundary this document describes.
 
 **Credentials obtained by other means.** The command iwaya runs may already hold credentials from environment variables, configuration files, keychains, or prior logins inside the container. Withholding a policy-managed secret does not make such a process unprivileged.
 
@@ -39,7 +46,7 @@ iwaya provides no protection against the following.
 
 ## Secret Lifecycle
 
-This lifecycle describes how long iwaya holds a resolved user secret and where it deliberately places it. It is distinct from a provider credential, such as a BWS access token, which has a separate, shorter lifecycle described in [Provider Credentials](#provider-credentials) below. Only the steps up to the container command are iwaya's to constrain; the inheritance past it is shown because a reader needs to know where the value ends up:
+This lifecycle describes how long iwaya holds a resolved user secret and where it deliberately places it under direct delivery; the proxy-backed lifecycle diverges after resolution and is shown in [Proxy-Backed Delivery](#proxy-backed-delivery). It is distinct from a provider credential, such as a BWS access token, which has a separate, shorter lifecycle described in [Provider Credentials](#provider-credentials) below. Only the steps up to the container command are iwaya's to constrain; the inheritance past it is shown because a reader needs to know where the value ends up:
 
 ```mermaid
 flowchart TD
@@ -91,6 +98,38 @@ flowchart TD
 A provider credential exists only in the environment of the provider subprocess that requires it. It must never reach the environment of the container runtime process, the target container, or any other process, and it does not appear anywhere on the resolved-user-secret path shown in [Secret Lifecycle](#secret-lifecycle).
 
 The same destinations [listed above](#secret-lifecycle) that a raw secret value must never be written to apply equally to a provider credential, with one difference: a provider credential's only permitted process environment is the provider subprocess that requires it, not the container runtime process. An access-token acquisition command's stdout carries the credential before iwaya holds it, and is subject to the same restrictions as the credential itself.
+
+## Proxy-Backed Delivery
+
+A `proxy-secret` policy entry changes where the raw value is allowed to exist. The target process receives an invocation-scoped phantom credential and a loopback proxy URL; the raw value goes only to an ephemeral proxy sidecar, which substitutes it into the configured header after validating the phantom and forwards the request to the fixed configured upstream. The configuration shape is defined in [the configuration model](configuration.md#proxy-backed-secret-delivery), and the rationale in [the proxy-backed delivery ADR](../adr/20260820T162206Z_proxy-backed-secret-delivery.md).
+
+```mermaid
+flowchart TD
+    provider["external secret provider"]
+    supervisor["value held by the iwaya supervisor"]
+    proxy["proxy sidecar process memory"]
+    target["process inside the target container"]
+    upstream["fixed configured upstream"]
+
+    provider -->|"resolve only after validation succeeds"| supervisor
+    supervisor -->|"transfer over the sidecar's stdin, then readiness"| proxy
+    supervisor -->|"phantom credential and loopback proxy URL only"| target
+    target -->|"request presenting the phantom"| proxy
+    proxy -->|"request with the raw value in the configured header"| upstream
+```
+
+The raw value of a proxy-backed secret may exist in exactly two places: the iwaya supervisor process, transiently between resolution and the transfer to the proxy, and the proxy sidecar's process memory for the rest of the invocation. It must never be written to:
+
+- the target process or target-container environment
+- any process argv, including the sidecar invocation the supervisor builds
+- the proxy image, its build context, or any image layer
+- container configuration or metadata the runtime retains
+- the filesystem as a delivery mechanism
+- diagnostics, readiness output, or logs
+
+The phantom credential is deliberately delivered to the target and is not subject to those restrictions, but it is useless outside the invocation: it is minted per `proxy-secret` per invocation, validated by the proxy on every request, and dies with the proxy. A phantom that leaks into a log is an expired artifact, not a credential.
+
+Every process in the target container's network namespace can reach the loopback proxy, and the proxy answers only requests that present a currently valid phantom. This narrows who can use the credential and for how long; it does not decide what the upstream is asked to do. Proxy-backed delivery is the same mitigation boundary as the rest of this document, not an authorization system.
 
 ## Division of Responsibility
 
