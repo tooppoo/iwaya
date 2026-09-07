@@ -90,7 +90,7 @@ pub fn exec_runtime(
     let argv = build_argv(context, policy, user_args);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
-    apply_injected_environment(&mut command, &environment);
+    apply_injected_environment(&mut command, environment);
     let source = command.exec();
     ExecError {
         runtime: context.runtime.clone(),
@@ -99,13 +99,14 @@ pub fn exec_runtime(
 }
 
 /// Registers each resolved value as an explicit environment entry on the
-/// command. `Command::env` overrides a same-named variable inherited from
-/// the invoking environment at spawn time, as the injection constraints
-/// require. Shared by both execution paths so the delivery contract cannot
-/// drift between them.
-fn apply_injected_environment(command: &mut Command, environment: &[(EnvName, Secret)]) {
+/// command, consuming the values: after this, the caller holds no readable
+/// copy of any delivered secret. `Command::env` overrides a same-named
+/// variable inherited from the invoking environment at spawn time, as the
+/// injection constraints require. Shared by both execution paths so the
+/// delivery contract cannot drift between them.
+fn apply_injected_environment(command: &mut Command, environment: Vec<(EnvName, Secret)>) {
     for (name, value) in environment {
-        command.env(name.as_str(), value.expose_to_subprocess_env());
+        value.deliver_to_subprocess_env(command, name.as_str());
     }
 }
 
@@ -130,7 +131,7 @@ pub fn supervise_runtime(
     let argv = build_argv(context, policy, user_args);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
-    apply_injected_environment(&mut command, &environment);
+    apply_injected_environment(&mut command, environment);
     apply_proxy_environment(&mut command, proxy_environment);
     supervise(command, &context.runtime)
 }
@@ -396,7 +397,7 @@ mod tests {
             (EnvName::new("OTHER"), Secret::new("second".to_string())),
         ];
 
-        apply_injected_environment(&mut command, &environment);
+        apply_injected_environment(&mut command, environment);
 
         let injected: Vec<(String, Option<String>)> = command
             .get_envs()

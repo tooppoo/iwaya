@@ -275,24 +275,28 @@ fn execute(invocation: Invocation) -> Result<u8, Failure> {
     }
     // The resolver map holds its own copies of every raw value; provisioning
     // took what the proxy path needs, so those copies are surplus from here
-    // and must not sit in memory across the whole supervision. The copies
-    // inside `provisioned` remain until the end of the invocation; shrinking
-    // that lifetime to the transfer serialization is issue #49.
+    // and must not sit in memory across the whole supervision.
     drop(resolved);
     let image = match proxy_image::ensure_proxy_image(&context.runtime) {
         Ok(image) => image,
         Err(e) => return Err(Failure::ProxyImage(e)),
     };
+    // Serializing consumes `provisioned`: from here the transfer line is the
+    // supervisor's only copy of the raw proxy values, and it is dropped the
+    // moment the sidecar holds them. Only the raw-free plans stay for the
+    // rest of the invocation.
+    let (transfer, plans) = transfer::into_transfer(provisioned);
     let sidecar = match sidecar::Sidecar::start(
         &context.runtime,
         &image,
         &context.container_name,
-        &transfer::transfer_line(&provisioned),
+        &transfer,
     ) {
         Ok(sidecar) => sidecar,
         Err(e) => return Err(Failure::Sidecar(e)),
     };
-    let proxy_environment = transfer::target_environment(&provisioned, sidecar.port());
+    drop(transfer);
+    let proxy_environment = transfer::target_environment(&plans, sidecar.port());
     // `sidecar` stays alive across the supervision and drops afterward on
     // every path, so the container is removed exactly when the invocation —
     // successful or not — is over.
