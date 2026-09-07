@@ -99,8 +99,9 @@ pub fn exec_runtime(
 }
 
 /// Registers each resolved value as an explicit environment entry on the
-/// command, consuming the values: after this, the caller holds no readable
-/// copy of any delivered secret. `Command::env` overrides a same-named
+/// command, consuming the `Secret` values: the raw values move into the
+/// command's environment table — their delivery destination — and no
+/// `Secret` binding remains to read. `Command::env` overrides a same-named
 /// variable inherited from the invoking environment at spawn time, as the
 /// injection constraints require. Shared by both execution paths so the
 /// delivery contract cannot drift between them.

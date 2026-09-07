@@ -13,13 +13,24 @@
 use std::process::Command;
 
 /// Deliberately implements neither `Display` nor `Debug`: formatting a secret
-/// anywhere is a compile error rather than a review finding.
-#[derive(Clone)]
+/// anywhere is a compile error rather than a review finding. `Clone` is not
+/// derived for the same reason: an unnamed clone would silently restore the
+/// double-read the consuming accessors exist to prevent, so duplication goes
+/// through [`Secret::clone_for_shared_declaration`] and stays greppable.
 pub struct Secret(String);
 
 impl Secret {
     pub fn new(value: String) -> Self {
         Secret(value)
+    }
+
+    /// Duplicates the value for one declared delivery that shares a
+    /// resolved secret with another declaration: two policy entries may
+    /// legitimately name the same provider and secret. Every duplication is
+    /// an exposure-adjacent event, so it carries an intent-bearing name
+    /// instead of a derived `Clone`.
+    pub fn clone_for_shared_declaration(&self) -> Secret {
+        Secret(self.0.clone())
     }
 
     /// Registers the raw value as an environment entry on a subprocess

@@ -240,7 +240,7 @@ fn execute(invocation: Invocation) -> Result<u8, Failure> {
         resolved
             .get(provider)
             .and_then(|values| values.get(name))
-            .cloned()
+            .map(secret::Secret::clone_for_shared_declaration)
             .expect("every declared secret was resolved")
     };
 
