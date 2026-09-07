@@ -127,7 +127,7 @@ The raw value of a proxy-backed secret may exist in exactly two places: the iway
 - the filesystem as a delivery mechanism
 - diagnostics, readiness output, or logs
 
-The phantom credential is deliberately delivered to the target and is not subject to those restrictions, but it is useless outside the invocation: it is minted per `proxy-secret` per invocation, validated by the proxy on every request, and dies with the proxy. A phantom that leaks into a log is an expired artifact, not a credential.
+The phantom credential is deliberately delivered to the target and is not subject to those restrictions, but its authority is bounded by the invocation: it is minted per `proxy-secret` per invocation, validated by the proxy on every request, and dies with the proxy. While the invocation runs, a leaked phantom is still a live capability for anything that can reach the loopback proxy; only once the proxy is gone does a phantom in a log become an expired artifact rather than a credential.
 
 Every process in the target container's network namespace can reach the loopback proxy, and the proxy answers only requests that present a currently valid phantom. This narrows who can use the credential and for how long; it does not decide what the upstream is asked to do. Proxy-backed delivery is the same mitigation boundary as the rest of this document, not an authorization system.
 
