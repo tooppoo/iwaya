@@ -1,7 +1,8 @@
 //! The supervisor side of the secret-transfer contract: provisioning each
 //! `proxy-secret` with a fresh phantom, serializing the transfer document
-//! the sidecar reads on stdin, and planning the environment the target
-//! process receives instead of raw values.
+//! the sidecar reads on stdin — which consumes the raw values, leaving the
+//! supervisor with none — and planning the environment the target process
+//! receives instead of them.
 //!
 //! The wire structs live here and are shared with the proxy-side parser
 //! (`proxy::parse_transfer`), so the two ends of the supervisor/proxy
@@ -67,40 +68,60 @@ impl ProvisionedProxySecret {
     }
 }
 
-/// Serializes the transfer document for `Sidecar::start`. The output is one
-/// line: JSON string escaping keeps every raw newline out of the
-/// serialization, which the sidecar's single-line delivery contract relies
-/// on.
-pub fn transfer_line(provisioned: &[ProvisionedProxySecret]) -> String {
-    let document = ProxyTransfer {
-        routes: provisioned
-            .iter()
-            .map(|secret| RouteTransfer {
-                header_name: secret.header_name.clone(),
-                template: secret.template.clone(),
-                upstream: secret.upstream.clone(),
-                phantom: secret.phantom.expose_to_transfer().to_string(),
-                secret: secret.raw_value.expose_to_proxy_transfer().to_string(),
-            })
-            .collect(),
-    };
-    serde_json::to_string(&document)
-        .expect("a struct of strings and vectors always serializes to JSON")
+/// What remains of a `proxy-secret` after its raw value has left for the
+/// proxy: everything the target environment needs, and nothing a secret
+/// lifetime depends on. Holding only this after the transfer is what keeps
+/// raw proxy-backed values out of the supervisor for the rest of the
+/// invocation.
+pub struct ProxySecretPlan {
+    env_name: EnvName,
+    base_url_env: EnvName,
+    phantom: Phantom,
+}
+
+/// Serializes the transfer document for `Sidecar::start`, consuming the
+/// provisioned set: the raw values move into the returned line — the
+/// supervisor's last copy of them — and only the raw-free plans remain for
+/// the caller. The output is one line: JSON string escaping keeps every raw
+/// newline out of the serialization, which the sidecar's single-line
+/// delivery contract relies on.
+pub fn into_transfer(
+    provisioned: Vec<ProvisionedProxySecret>,
+) -> (String, Vec<ProxySecretPlan>) {
+    let mut routes = Vec::with_capacity(provisioned.len());
+    let mut plans = Vec::with_capacity(provisioned.len());
+    for secret in provisioned {
+        routes.push(RouteTransfer {
+            header_name: secret.header_name,
+            template: secret.template,
+            upstream: secret.upstream,
+            phantom: secret.phantom.expose_to_transfer().to_string(),
+            secret: secret.raw_value.into_proxy_transfer(),
+        });
+        plans.push(ProxySecretPlan {
+            env_name: secret.env_name,
+            base_url_env: secret.base_url_env,
+            phantom: secret.phantom,
+        });
+    }
+    let line = serde_json::to_string(&ProxyTransfer { routes })
+        .expect("a struct of strings and vectors always serializes to JSON");
+    (line, plans)
 }
 
 /// The environment the target process receives for its proxy-backed
 /// secrets: the phantom under each credential name, and the loopback proxy
-/// URL under each `base-url-env`. Raw values never appear here — this is
-/// the entire proxy-secret surface the target sees.
-pub fn target_environment(provisioned: &[ProvisionedProxySecret], port: u16) -> Vec<(EnvName, String)> {
-    let mut environment = Vec::with_capacity(provisioned.len() * 2);
-    for secret in provisioned {
+/// URL under each `base-url-env`. Built from raw-free plans — this is the
+/// entire proxy-secret surface the target sees.
+pub fn target_environment(plans: &[ProxySecretPlan], port: u16) -> Vec<(EnvName, String)> {
+    let mut environment = Vec::with_capacity(plans.len() * 2);
+    for plan in plans {
         environment.push((
-            secret.env_name.clone(),
-            secret.phantom.expose_to_target_env().to_string(),
+            plan.env_name.clone(),
+            plan.phantom.expose_to_target_env().to_string(),
         ));
         environment.push((
-            secret.base_url_env.clone(),
+            plan.base_url_env.clone(),
             format!("http://127.0.0.1:{port}"),
         ));
     }
@@ -134,7 +155,8 @@ mod tests {
 
     #[test]
     fn round_trips_the_forwarding_fields_through_the_proxy_parser() {
-        let routes = parse_transfer(&transfer_line(&provisioned())).unwrap();
+        let (line, _) = into_transfer(provisioned());
+        let routes = parse_transfer(&line).unwrap();
         let [route] = routes.as_slice() else {
             panic!("expected exactly one route");
         };
@@ -150,12 +172,14 @@ mod tests {
 
     #[test]
     fn round_trips_the_credential_material_through_the_proxy_parser() {
-        let provisioned = provisioned();
-        let routes = parse_transfer(&transfer_line(&provisioned)).unwrap();
+        let (line, plans) = into_transfer(provisioned());
+        let routes = parse_transfer(&line).unwrap();
         let [route] = routes.as_slice() else {
             panic!("expected exactly one route");
         };
-        assert!(route.phantom.matches_presented(provisioned[0].phantom.expose_to_target_env()));
+        // The plan keeps the same phantom the transfer carried, so the
+        // proxy-side route recognises the value the target will present.
+        assert!(route.phantom.matches_presented(plans[0].phantom.expose_to_target_env()));
         assert_eq!(route.raw_value.expose_to_upstream_header(), "raw-secret-value");
     }
 
@@ -165,7 +189,8 @@ mod tests {
         spec.inject_header.template = "Bearer\n{}".to_string();
         let provisioned =
             vec![ProvisionedProxySecret::provision(&spec, Secret::new("raw\nvalue".to_string())).unwrap()];
-        assert!(!transfer_line(&provisioned).contains('\n'));
+        let (line, _) = into_transfer(provisioned);
+        assert!(!line.contains('\n'));
     }
 
     #[test]
@@ -181,20 +206,21 @@ mod tests {
 
     #[test]
     fn plans_the_phantom_under_the_credential_env_name() {
-        let provisioned = provisioned();
-        let environment = target_environment(&provisioned, 34567);
+        let (_, plans) = into_transfer(provisioned());
+        let environment = target_environment(&plans, 34567);
         assert_eq!(
             environment[0],
             (
                 EnvName::new("ANTHROPIC_AUTH_TOKEN"),
-                provisioned[0].phantom.expose_to_target_env().to_string()
+                plans[0].phantom.expose_to_target_env().to_string()
             )
         );
     }
 
     #[test]
     fn plans_the_loopback_proxy_url_under_the_base_url_env() {
-        let environment = target_environment(&provisioned(), 34567);
+        let (_, plans) = into_transfer(provisioned());
+        let environment = target_environment(&plans, 34567);
         assert_eq!(
             environment[1],
             (
@@ -206,7 +232,8 @@ mod tests {
 
     #[test]
     fn plans_no_entry_carrying_the_raw_value() {
-        let environment = target_environment(&provisioned(), 34567);
+        let (_, plans) = into_transfer(provisioned());
+        let environment = target_environment(&plans, 34567);
         assert!(
             environment
                 .iter()

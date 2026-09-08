@@ -118,7 +118,7 @@ flowchart TD
     proxy -->|"request with the raw value in the configured header"| upstream
 ```
 
-The raw value of a proxy-backed secret may exist in exactly two places: the iwaya supervisor process and the proxy sidecar's process memory. The supervisor needs the value only between resolution and the transfer to the proxy, but the current implementation retains its copy for the invocation's duration; narrowing that window to the transfer is tracked in issue #49. The raw value must never be written to:
+The raw value of a proxy-backed secret may exist in exactly two places: the iwaya supervisor process, only between resolution and the delivery of the transfer to the sidecar, and the proxy sidecar's process memory for the rest of the invocation. Serializing the transfer consumes the supervisor's copies, so once the sidecar has received it, the supervisor no longer holds any copy of a raw proxy-backed value; freed buffers are not scrubbed, so this is an ownership guarantee, not byte-level erasure of the supervisor's address space. The raw value must never be written to:
 
 - the target process or target-container environment
 - any process argv, including the sidecar invocation the supervisor builds
