@@ -1,0 +1,76 @@
+# A signal sent to the supervising iwaya's pid reaches the supervised target:
+# the kernel delivers a pid-directed SIGTERM (a 'docker stop', a service
+# manager, 'kill <iwaya-pid>') to iwaya alone, and only the relay makes it
+# reach the runtime child
+# (docs/adr/20260823T064329Z_signal-forwarding-with-signal-hook.md). The fake
+# runtime's 'exec' traps TERM and exits with the sentinel 43, which nothing
+# else can produce: a missing relay lets the unforwarded signal kill iwaya
+# itself (143), and a swallowed signal lets the target run to completion (0),
+# so both regressions fail the assertion instead of passing it vacuously.
+
+before_each {
+  write <"config.kdl"> ```
+    iwaya version=1 {
+      providers {
+        bws "b" {
+          project "p"
+          access-token { exec "echo" "fake-access-token" }
+        }
+      }
+      contexts {
+        docker "ctx" {
+          runtime "fake-docker"
+          user "u"
+          workdir "/w"
+          container-name "target-container"
+        }
+      }
+      policies {
+        command "proxied" {
+          proxy-secret "TOKEN" {
+            provider "b"
+            secret-name "TOKEN"
+            upstream "https://api.example"
+            base-url-env "TOKEN_BASE_URL"
+            inject-header "x-api-key" "{}"
+          }
+        }
+      }
+    }
+    ```
+  write <"bws"> ```
+    #!/bin/sh
+    case "$1 $2" in
+      "project list") echo '[{"id":"pid1","name":"p"}]' ;;
+      "secret list")  echo '[{"key":"TOKEN","value":"raw-secret-value"}]' ;;
+      *) exit 1 ;;
+    esac
+    ```
+  write <"fake-docker"> ```
+    #!/bin/sh
+    case "$1" in
+      image) exit 0 ;;
+      run)   IFS= read -r line
+             echo '{"port":45678}' ;;
+      rm)    exit 0 ;;
+      exec)  trap 'kill "$sleeper" 2>/dev/null; exit 43' TERM
+             sleep 15 & sleeper=$!
+             : > exec-started
+             wait "$sleeper" ;;
+      *)     echo "unexpected runtime subcommand: $1" >&2
+             exit 9 ;;
+    esac
+    ```
+}
+
+# The marker appears only after the trap is installed, so the kill cannot
+# race ahead of the handler. The wait loop assumes a fractional-second
+# 'sleep' (coreutils/busybox); it bounds the marker wait to ~10 seconds so a
+# never-starting target fails the case instead of hanging it.
+case "forwards a pid-directed SIGTERM to the supervised target" {
+  $ chmod +x fake-docker bws
+  $ PATH="$PWD:$PATH" IWAYA_CONFIG=config.kdl iwaya exec --context ctx proxied & pid=$!; i=0; while [ ! -f exec-started ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -TERM "$pid"; wait "$pid"
+  assert {
+    exit 43
+  }
+}

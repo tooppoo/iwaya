@@ -1,0 +1,20 @@
+# The hidden `iwaya proxy` mode reads its secret transfer on stdin, binds a
+# loopback listener, and announces the chosen port on stdout before serving.
+# `timeout` bounds the otherwise-endless server; `head -n1` captures the one
+# readiness line the supervisor would read.
+
+case "announces the selected port on stdout" {
+  $ printf '%s' '{"routes":[{"header_name":"x-api-key","template":"{}","upstream":"https://api.example","phantom":"iwaya-phantom-abc","secret":"raw-secret-value"}]}' | timeout 3 iwaya proxy | head -n1
+  assert {
+    stdout contains "\"port\":"
+  }
+}
+
+case "keeps the secret out of the readiness output" {
+  $ printf '%s' '{"routes":[{"header_name":"x-api-key","template":"{}","upstream":"https://api.example","phantom":"iwaya-phantom-abc","secret":"raw-secret-value"}]}' | timeout 3 iwaya proxy | head -n1
+  assert {
+    not {
+      stdout contains "raw-secret-value"
+    }
+  }
+}

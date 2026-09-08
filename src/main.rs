@@ -8,18 +8,26 @@
 //! are single lines on stderr, usage errors and help are rendered by clap
 //! (which exits with 2, the provisional usage category), and the exit codes
 //! below are provisional; they distinguish the failure stages the model
-//! requires to stay distinguishable.
+//! requires to stay distinguishable. One exception to the usage category:
+//! a bare `iwaya` is a request for orientation, not a mistake, so it renders
+//! the same help `--help` renders, on stdout with exit 0.
 
 mod bws;
 mod config;
+mod phantom;
+mod proxy;
+mod proxy_image;
 mod run;
 mod secret;
+mod sidecar;
+mod transfer;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::error::ErrorKind;
+use clap::{CommandFactory, Parser};
 
 use config::{CommandId, ContextId, Provider, SecretName};
 
@@ -42,6 +50,11 @@ enum Cli {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// Run the credential-aware proxy, reading its secret transfer on stdin.
+    /// Hidden: this is the process the sidecar image runs, driven by the
+    /// supervisor, not a command a user invokes directly.
+    #[command(hide = true)]
+    Proxy,
 }
 
 // Debug is safe here: no variant carries a `Secret`, and `Secret` itself has
@@ -52,6 +65,9 @@ enum Failure {
     UnknownContext(ContextId),
     UnknownCommand(CommandId),
     Resolution(bws::ResolveError),
+    Provision(phantom::GenerateError),
+    ProxyImage(proxy_image::ProxyImageError),
+    Sidecar(sidecar::SidecarError),
     Execution(run::ExecError),
 }
 
@@ -61,7 +77,13 @@ impl Failure {
             Failure::Config(_) => EXIT_CONFIG,
             Failure::UnknownContext(_) | Failure::UnknownCommand(_) => EXIT_UNKNOWN_SELECTION,
             Failure::Resolution(_) => EXIT_RESOLUTION,
-            Failure::Execution(_) => EXIT_EXECUTION,
+            // Provisioning, image preparation, and sidecar startup are
+            // stages of constructing the execution, so they share its
+            // provisional category.
+            Failure::Provision(_)
+            | Failure::ProxyImage(_)
+            | Failure::Sidecar(_)
+            | Failure::Execution(_) => EXIT_EXECUTION,
         }
     }
 
@@ -75,24 +97,74 @@ impl Failure {
                 format!("unknown command '{id}': no configured command policy has this identifier")
             }
             Failure::Resolution(e) => format!("secret resolution failed, nothing was executed: {e}"),
+            Failure::Provision(e) => {
+                format!("proxy-secret provisioning failed, nothing was executed: {e}")
+            }
+            Failure::ProxyImage(e) => {
+                format!("proxy image preparation failed, nothing was executed: {e}")
+            }
+            Failure::Sidecar(e) => {
+                format!("proxy sidecar startup failed, nothing was executed: {e}")
+            }
             Failure::Execution(e) => e.to_string(),
         }
     }
 }
 
 fn main() -> ExitCode {
-    let Cli::Exec { context, command, args } = Cli::parse();
+    let parsed = Cli::try_parse().unwrap_or_else(|error| {
+        // A bare `iwaya` behaves exactly like `iwaya --help`: help on
+        // stdout, exit 0. Every other malformed invocation stays a clap
+        // usage error on stderr with exit 2.
+        if matches!(
+            error.kind(),
+            ErrorKind::MissingSubcommand | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        ) {
+            let _ = Cli::command().print_help();
+            std::process::exit(0);
+        }
+        error.exit()
+    });
+    match parsed {
+        Cli::Exec { context, command, args } => run_exec(context, command, args),
+        Cli::Proxy => run_proxy(),
+    }
+}
+
+fn run_exec(context: String, command: String, args: Vec<String>) -> ExitCode {
     let invocation = Invocation {
         context: ContextId::new(&context),
         command: CommandId::new(&command),
         args,
     };
 
-    // `exec_and_never_return` replaces this process on success, so reaching
-    // a return value at all means a failure to report.
-    let failure = exec_and_never_return(invocation);
-    eprintln!("iwaya: error: {}", failure.message());
-    ExitCode::from(failure.exit_code())
+    // A direct-`secret` execution replaces this process, so `Ok` can only
+    // come from a supervised proxy-backed execution, carrying the exit code
+    // the target produced.
+    match execute(invocation) {
+        Ok(code) => ExitCode::from(code),
+        Err(failure) => {
+            eprintln!("iwaya: error: {}", failure.message());
+            ExitCode::from(failure.exit_code())
+        }
+    }
+}
+
+/// Serves the credential-aware proxy until the process is terminated. The
+/// secret transfer arrives on stdin and the readiness line on stdout; the
+/// supervisor manages this process's lifetime, so `serve` returning at all
+/// means the listener stopped and there is nothing left to do.
+fn run_proxy() -> ExitCode {
+    match proxy::run_proxy_mode(std::io::stdin().lock(), std::io::stdout().lock()) {
+        Ok(proxy) => {
+            proxy.serve();
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("iwaya: error: {e}");
+            ExitCode::from(EXIT_EXECUTION)
+        }
+    }
 }
 
 struct Invocation {
@@ -114,27 +186,38 @@ fn config_path() -> PathBuf {
     config_home.join("iwaya").join("config.kdl")
 }
 
-fn exec_and_never_return(invocation: Invocation) -> Failure {
+fn execute(invocation: Invocation) -> Result<u8, Failure> {
     let configuration = match config::load(&config_path()) {
         Ok(configuration) => configuration,
-        Err(e) => return Failure::Config(e),
+        Err(e) => return Err(Failure::Config(e)),
     };
 
     let Some(context) = configuration.context(&invocation.context) else {
-        return Failure::UnknownContext(invocation.context);
+        return Err(Failure::UnknownContext(invocation.context));
     };
     let Some(policy) = configuration.policy(&invocation.command) else {
-        return Failure::UnknownCommand(invocation.command);
+        return Err(Failure::UnknownCommand(invocation.command));
     };
 
-    // Every declared secret resolves before anything executes, and only
-    // declared secrets are resolved. One failure aborts the invocation: a
-    // partially populated environment is never handed to the container.
+    // Every declared secret — direct and proxy-backed — resolves before
+    // anything executes, and only declared secrets are resolved. One failure
+    // aborts the invocation: a partially populated environment is never
+    // handed to the container.
     let mut names_by_provider: Vec<(&config::ProviderId, Vec<&SecretName>)> = Vec::new();
-    for secret in &policy.secrets {
-        match names_by_provider.iter_mut().find(|(id, _)| *id == &secret.provider) {
-            Some((_, names)) => names.push(&secret.secret_name),
-            None => names_by_provider.push((&secret.provider, vec![&secret.secret_name])),
+    let declared = policy
+        .secrets
+        .iter()
+        .map(|secret| (&secret.provider, &secret.secret_name))
+        .chain(
+            policy
+                .proxy_secrets
+                .iter()
+                .map(|secret| (&secret.provider, &secret.secret_name)),
+        );
+    for (provider, name) in declared {
+        match names_by_provider.iter_mut().find(|(id, _)| *id == provider) {
+            Some((_, names)) => names.push(name),
+            None => names_by_provider.push((provider, vec![name])),
         }
     }
 
@@ -149,24 +232,82 @@ fn exec_and_never_return(invocation: Invocation) -> Failure {
             Ok(values) => {
                 resolved.insert(provider_id, values);
             }
-            Err(e) => return Failure::Resolution(e),
+            Err(e) => return Err(Failure::Resolution(e)),
         }
     }
+
+    let resolved_value = |provider: &config::ProviderId, name: &SecretName| {
+        resolved
+            .get(provider)
+            .and_then(|values| values.get(name))
+            .map(secret::Secret::clone_for_shared_declaration)
+            .expect("every declared secret was resolved")
+    };
 
     let environment = policy
         .secrets
         .iter()
-        .map(|spec| {
-            let value = resolved
-                .get(&spec.provider)
-                .and_then(|values| values.get(&spec.secret_name))
-                .cloned()
-                .expect("every declared secret was resolved");
-            (spec.env_name.clone(), value)
-        })
+        .map(|spec| (spec.env_name.clone(), resolved_value(&spec.provider, &spec.secret_name)))
         .collect();
 
-    Failure::Execution(run::exec_runtime(context, policy, environment, &invocation.args))
+    if policy.proxy_secrets.is_empty() {
+        // `exec_runtime` replaces this process on success, so reaching the
+        // return at all means a failure to report.
+        return Err(Failure::Execution(run::exec_runtime(
+            context,
+            policy,
+            environment,
+            &invocation.args,
+        )));
+    }
+
+    // The proxy-backed order is fixed: provision, prepare the image, start
+    // the sidecar, and only then start the target — the target must never
+    // run before the proxy is ready
+    // (docs/adr/20260820T162206Z_proxy-backed-secret-delivery.md).
+    let mut provisioned = Vec::with_capacity(policy.proxy_secrets.len());
+    for spec in &policy.proxy_secrets {
+        let raw_value = resolved_value(&spec.provider, &spec.secret_name);
+        match transfer::ProvisionedProxySecret::provision(spec, raw_value) {
+            Ok(secret) => provisioned.push(secret),
+            Err(e) => return Err(Failure::Provision(e)),
+        }
+    }
+    // The resolver map holds its own copies of every raw value; provisioning
+    // took what the proxy path needs, so those copies are surplus from here
+    // and must not sit in memory across the whole supervision.
+    drop(resolved);
+    let image = match proxy_image::ensure_proxy_image(&context.runtime) {
+        Ok(image) => image,
+        Err(e) => return Err(Failure::ProxyImage(e)),
+    };
+    // Serializing consumes `provisioned`: from here the transfer line is the
+    // supervisor's only copy of the raw proxy values, and it is dropped the
+    // moment the sidecar holds them. Only the raw-free plans stay for the
+    // rest of the invocation.
+    let (transfer, plans) = transfer::into_transfer(provisioned);
+    let sidecar = match sidecar::Sidecar::start(
+        &context.runtime,
+        &image,
+        &context.container_name,
+        &transfer,
+    ) {
+        Ok(sidecar) => sidecar,
+        Err(e) => return Err(Failure::Sidecar(e)),
+    };
+    drop(transfer);
+    let proxy_environment = transfer::target_environment(&plans, sidecar.port());
+    // `sidecar` stays alive across the supervision and drops afterward on
+    // every path, so the container is removed exactly when the invocation —
+    // successful or not — is over.
+    run::supervise_runtime(
+        context,
+        policy,
+        environment,
+        &proxy_environment,
+        &invocation.args,
+    )
+    .map_err(Failure::Execution)
 }
 
 #[cfg(test)]
@@ -178,8 +319,10 @@ mod tests {
     }
 
     fn parsed_exec(args: &[&str]) -> (String, String, Vec<String>) {
-        let Cli::Exec { context, command, args } = parse(args).unwrap();
-        (context, command, args)
+        match parse(args).unwrap() {
+            Cli::Exec { context, command, args } => (context, command, args),
+            Cli::Proxy => panic!("expected an exec invocation"),
+        }
     }
 
     #[test]
@@ -206,7 +349,9 @@ mod tests {
 
     #[test]
     fn rejects_malformed_invocations() {
-        assert!(parse(&[]).is_err(), "a subcommand is required");
+        // At the clap layer a missing subcommand is still an error; main
+        // renders that one case as `--help` output (e2e/usage.repor).
+        assert!(parse(&[]).is_err(), "a missing subcommand is a parse error");
         assert!(parse(&["run"]).is_err(), "unknown subcommand");
         assert!(parse(&["exec", "cmd"]).is_err(), "'--context' is required");
         assert!(parse(&["exec", "--context"]).is_err(), "'--context' requires a value");
